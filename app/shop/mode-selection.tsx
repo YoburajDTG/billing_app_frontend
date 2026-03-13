@@ -20,7 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 export default function ModeSelectionScreen() {
     const router = useRouter();
-    const { user, logout } = useAuth();
+    const { user } = useAuth();
     const { isDark, toggleTheme, language } = useAppTheme();
     const insets = useSafeAreaInsets();
 
@@ -29,11 +29,6 @@ export default function ModeSelectionScreen() {
         router.push({ pathname: '/shop', params: { mode } });
     };
 
-    const handleLogout = () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        logout();
-        router.replace('/login');
-    };
 
     const primaryColor = '#FF8C00';
     const background = isDark ? '#0F0F0F' : '#F8FAFC';
@@ -60,9 +55,6 @@ export default function ModeSelectionScreen() {
                 <View style={styles.heroActions}>
                     <TouchableOpacity onPress={toggleTheme} style={styles.roundActionBtn}>
                         <Ionicons name={isDark ? "sunny" : "moon"} size={22} color="#FF8C00" />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={handleLogout} style={[styles.roundActionBtn, { backgroundColor: '#EF4444' }]}>
-                        <Ionicons name="log-out" size={22} color="#FFF" />
                     </TouchableOpacity>
                 </View>
             </LinearGradient>

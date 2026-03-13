@@ -132,11 +132,11 @@ export default function DashboardScreen() {
                             {getGreeting()}
                         </Text>
                         <Text style={[styles.shopNameHero, { color: isDark ? textCol : '#FFF' }]} numberOfLines={1}>
-                            {user?.shopName || (language === 'Tamil' ? 'சுஜி காய்கறிகள்' : 'SUJI VEGGIES')}
+                            {user?.shopName || (language === 'Tamil' ? 'சுஜி காய்கறி கடை' : 'SUJI VEGETABLES')}
                         </Text>
                     </View>
 
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: scale(8) }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: scale(6) }}>
                         <View style={[styles.langToggleContainer, { backgroundColor: isDark ? '#2C2C2E' : 'rgba(255,255,255,0.2)' }]}>
                             <TouchableOpacity 
                                 onPress={() => language !== 'English' && toggleLanguage()} 
@@ -192,18 +192,30 @@ export default function DashboardScreen() {
                     {/* Revenue Banner */}
                     <Animated.View entering={FadeInDown.delay(100).duration(500)}>
                         <LinearGradient
-                            colors={isDark ? ['#252525', '#1E1E1E'] : ['rgba(255,255,255,0.25)', 'rgba(255,255,255,0.15)']}
+                            colors={isDark ? ['#252525', '#1E1E1E'] : ['rgba(255,255,255,0.3)', 'rgba(255,255,255,0.15)']}
                             style={styles.revenueBanner}
                         >
                             <View style={styles.revenueItem}>
-                                <Text style={[styles.revenueLabel, { color: isDark ? subCol : 'rgba(255,255,255,0.8)' }]}>{language === 'Tamil' ? 'இன்றைய விற்பனை' : 'Today\'s Sales'}</Text>
+                                <Text 
+                                    style={[styles.revenueLabel, { color: isDark ? subCol : 'rgba(255,255,255,0.85)' }]}
+                                    numberOfLines={1}
+                                    adjustsFontSizeToFit
+                                >
+                                    {language === 'Tamil' ? 'இன்றைய விற்பனை' : 'Today\'s Sales'}
+                                </Text>
                                 <Text style={[styles.revenueValue, { color: '#FFF' }]}>
                                     ₹{Number(stats.todaySales).toLocaleString('en-IN')}
                                 </Text>
                             </View>
                             <View style={[styles.revenueDivider, { backgroundColor: isDark ? borderCol : 'rgba(255,255,255,0.3)' }]} />
                             <View style={styles.revenueItem}>
-                                <Text style={[styles.revenueLabel, { color: isDark ? subCol : 'rgba(255,255,255,0.8)' }]}>{language === 'Tamil' ? 'இந்த மாதம்' : 'Month Total'}</Text>
+                                <Text 
+                                    style={[styles.revenueLabel, { color: isDark ? subCol : 'rgba(255,255,255,0.85)' }]}
+                                    numberOfLines={1}
+                                    adjustsFontSizeToFit
+                                >
+                                    {language === 'Tamil' ? 'இந்த மாதம்' : 'Month Total'}
+                                </Text>
                                 <Text style={[styles.revenueValue, { color: '#FFF' }]}>
                                     ₹{Number(stats.monthSales).toLocaleString('en-IN')}
                                 </Text>
@@ -217,26 +229,25 @@ export default function DashboardScreen() {
                     <Animated.View entering={FadeInUp.delay(200).duration(400)} style={styles.quickStatsRow}>
                         <View style={[styles.quickStatCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
                             <View style={[styles.quickStatIcon, { backgroundColor: '#3B82F615' }]}>
-                                <Ionicons name="people" size={22} color="#3B82F6" />
+                                <Ionicons name="people" size={20} color="#3B82F6" />
                             </View>
-                            <Text style={[styles.quickStatValue, { color: textCol }]}>{stats.totalCustomers}</Text>
-                            <Text style={[styles.quickStatLabel, { color: subCol }]}>{language === 'Tamil' ? 'வாடிக்கையாளர்கள்' : 'Customers'}</Text>
+                            <Text style={[styles.quickStatValue, { color: textCol }]} numberOfLines={1} adjustsFontSizeToFit>{stats.totalCustomers}</Text>
+                            <Text style={[styles.quickStatLabel, { color: subCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Customers'}</Text>
                         </View>
-
                         <View style={[styles.quickStatCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
                             <View style={[styles.quickStatIcon, { backgroundColor: '#10B98115' }]}>
-                                <MaterialCommunityIcons name="food-apple" size={22} color="#10B981" />
+                                <MaterialCommunityIcons name="food-apple" size={20} color="#10B981" />
                             </View>
-                            <Text style={[styles.quickStatValue, { color: textCol }]}>{stats.totalProducts}</Text>
-                            <Text style={[styles.quickStatLabel, { color: subCol }]}>{language === 'Tamil' ? 'பொருட்கள்' : 'Products'}</Text>
+                            <Text style={[styles.quickStatValue, { color: textCol }]} numberOfLines={1} adjustsFontSizeToFit>{stats.totalProducts}</Text>
+                            <Text style={[styles.quickStatLabel, { color: subCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'பொருட்கள்' : 'Products'}</Text>
                         </View>
-
+ 
                         <View style={[styles.quickStatCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
                             <View style={[styles.quickStatIcon, { backgroundColor: primary + '15' }]}>
-                                <MaterialCommunityIcons name="receipt" size={22} color={primary} />
+                                <MaterialCommunityIcons name="receipt" size={20} color={primary} />
                             </View>
-                            <Text style={[styles.quickStatValue, { color: textCol }]}>{(stats as any).todayCount || 0}</Text>
-                            <Text style={[styles.quickStatLabel, { color: subCol }]}>{language === 'Tamil' ? 'இன்றைய ரசீதுகள்' : 'Bills Today'}</Text>
+                            <Text style={[styles.quickStatValue, { color: textCol }]} numberOfLines={1} adjustsFontSizeToFit>{(stats as any).todayCount || 0}</Text>
+                            <Text style={[styles.quickStatLabel, { color: subCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'இன்றைய பில்' : 'Bills Today'}</Text>
                         </View>
                     </Animated.View>
 
@@ -252,7 +263,7 @@ export default function DashboardScreen() {
                                 <View style={styles.actionIconBox}>
                                     <Ionicons name="cart" size={26} color="#FFF" />
                                 </View>
-                                <Text style={styles.actionTitle}>{language === 'Tamil' ? 'சில்லரை விற்பனை' : 'Retail Bill'}</Text>
+                                <Text style={styles.actionTitle} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'சில்லரை விற்பனை' : 'Retail Bill'}</Text>
                                 <Text style={styles.actionDesc}>{language === 'Tamil' ? 'சாதாரண விலை' : 'Standard rates'}</Text>
                             </TouchableOpacity>
 
@@ -264,7 +275,7 @@ export default function DashboardScreen() {
                                 <View style={styles.actionIconBox}>
                                     <Ionicons name="business" size={26} color="#FFF" />
                                 </View>
-                                <Text style={styles.actionTitle}>{language === 'Tamil' ? 'மொத்த விற்பனை' : 'Wholesale'}</Text>
+                                <Text style={styles.actionTitle} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'மொத்த விற்பனை' : 'Wholesale'}</Text>
                                 <Text style={styles.actionDesc}>{language === 'Tamil' ? 'மொத்த விலை' : 'Bulk rates'}</Text>
                             </TouchableOpacity>
 
@@ -276,7 +287,7 @@ export default function DashboardScreen() {
                                 <View style={[styles.actionIconBox, { backgroundColor: primary + '20' }]}>
                                     <Ionicons name="pricetag" size={26} color={primary} />
                                 </View>
-                                <Text style={[styles.actionTitle, { color: textCol }]}>{language === 'Tamil' ? 'விலை நிர்ணயம்' : 'Set Prices'}</Text>
+                                <Text style={[styles.actionTitle, { color: textCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'விலை நிர்ணயம்' : 'Set Prices'}</Text>
                                 <Text style={[styles.actionDesc, { color: subCol }]}>{language === 'Tamil' ? 'தினசரி விலை' : 'Daily rates'}</Text>
                             </TouchableOpacity>
 
@@ -288,7 +299,7 @@ export default function DashboardScreen() {
                                 <View style={[styles.actionIconBox, { backgroundColor: '#10B98115' }]}>
                                     <MaterialCommunityIcons name="history" size={26} color="#10B981" />
                                 </View>
-                                <Text style={[styles.actionTitle, { color: textCol }]}>{language === 'Tamil' ? 'ரசீது வரலாறு' : 'History'}</Text>
+                                <Text style={[styles.actionTitle, { color: textCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'ரசீது வரலாறு' : 'History'}</Text>
                                 <Text style={[styles.actionDesc, { color: subCol }]}>{language === 'Tamil' ? 'அனைத்து ரசீதுகள்' : 'All invoices'}</Text>
                             </TouchableOpacity>
                         </View>
@@ -489,11 +500,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     langPill: {
-        paddingHorizontal: scale(10),
+        paddingHorizontal: scale(8),
         paddingVertical: verticalScale(5),
         borderRadius: scale(8),
         alignItems: 'center',
         justifyContent: 'center',
+        minWidth: scale(40),
     },
     langPillActive: {
         backgroundColor: '#FFF',
@@ -571,8 +583,9 @@ const styles = StyleSheet.create({
         marginBottom: 2,
     },
     quickStatLabel: {
-        fontSize: moderateScale(11),
-        fontWeight: '600',
+        fontSize: moderateScale(10),
+        fontWeight: '700',
+        marginTop: 2,
     },
     // Section headers
     sectionTitle: {

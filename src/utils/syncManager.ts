@@ -11,11 +11,13 @@ export const SyncManager = {
             // Convert UI bill data to database format
             const billPayload = {
                 total_amount: billData.grandTotal || 0,
-                discount: 0,
+                discount: billData.discount || 0,
                 customer_name: billData.userName || 'Guest',
                 mode: billData.mode || 'Retail',
                 items: billData.items.map((item: any) => ({
                     vegetable_id: item.id,
+                    name: item.name,
+                    tamil_name: item.tamilName,
                     quantity: item.quantity,
                     unit_price: item.price,
                     total_price: item.total,

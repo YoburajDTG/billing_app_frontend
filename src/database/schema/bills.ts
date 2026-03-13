@@ -17,6 +17,8 @@ export interface BillItem {
     id: string;
     bill_id: string;
     vegetable_id: string;
+    name?: string;
+    tamil_name?: string;
     quantity: number;
     unit_price: number;
     total_price: number;
