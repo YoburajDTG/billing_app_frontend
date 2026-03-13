@@ -1,4 +1,5 @@
 import { useAppTheme } from '@/context/ThemeContext';
+import { useRouter } from 'expo-router';
 import { Customer, customerRepository } from '@/database/repositories/customerRepository';
 import { moderateScale, scale, verticalScale } from '@/utils/responsive';
 import { Feather, Ionicons } from '@expo/vector-icons';
@@ -19,6 +20,7 @@ export default function CustomersScreen() {
     const [address, setAddress] = useState('');
     const { isDark, language } = useAppTheme();
     const insets = useSafeAreaInsets();
+    const router = useRouter();
 
     useEffect(() => {
         fetchCustomers();
@@ -147,7 +149,10 @@ export default function CustomersScreen() {
             >
                 <View style={styles.headerDecor} />
                 <View style={styles.headerTop}>
-                    <View>
+                    <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+                        <Ionicons name="arrow-back" size={24} color="#FF8C00" />
+                    </TouchableOpacity>
+                    <View style={{ flex: 1 }}>
                         <Text style={styles.headerTitle}>{language === 'Tamil' ? 'வாடிக்கையாளர்கள்' : 'Customer base'}</Text>
                         <Text style={styles.headerSubtitle}>{customers.length} {language === 'Tamil' ? 'மொத்த வாடிக்கையாளர்கள்' : 'total customers'}</Text>
                     </View>
@@ -298,6 +303,19 @@ const styles = StyleSheet.create({
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 5 },
         shadowOpacity: 0.2,
+        shadowRadius: 10,
+    },
+    backBtn: {
+        width: scale(46),
+        height: scale(46),
+        borderRadius: scale(16),
+        backgroundColor: '#FFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: scale(18),
+        elevation: 5,
+        shadowColor: '#000',
+        shadowOpacity: 0.1,
         shadowRadius: 10,
     },
     loaderBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },

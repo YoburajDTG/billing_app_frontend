@@ -174,6 +174,42 @@ export default function MerchantProfileScreen() {
                         ) : null}
                     </View>
                 </View>
+                
+                <View style={[styles.card, { backgroundColor: cardBg }]}>
+                    <Text style={[styles.sectionCardTitle, { color: textColor }]}>
+                        {language === 'Tamil' ? 'வணிக மேலாண்மை' : 'Business Management'}
+                    </Text>
+
+                    <TouchableOpacity 
+                        style={styles.menuListItem} 
+                        onPress={() => router.push('/shop/customers')}
+                        activeOpacity={0.7}
+                    >
+                        <View style={[styles.menuIconBox, { backgroundColor: '#3B82F615' }]}>
+                            <Ionicons name="people" size={20} color="#3B82F6" />
+                        </View>
+                        <Text style={[styles.menuListText, { color: textColor }]}>
+                            {language === 'Tamil' ? 'வாடிக்கையாளர் விவரங்கள்' : 'Customer Details'}
+                        </Text>
+                        <Feather name="chevron-right" size={18} color={subTextColor} />
+                    </TouchableOpacity>
+
+                    <View style={[styles.menuDivider, { backgroundColor: isDark ? '#333' : '#F1F5F9' }]} />
+
+                    <TouchableOpacity 
+                        style={styles.menuListItem} 
+                        onPress={() => router.push('/shop/prices')}
+                        activeOpacity={0.7}
+                    >
+                        <View style={[styles.menuIconBox, { backgroundColor: primaryColor + '15' }]}>
+                            <Ionicons name="pricetag" size={20} color={primaryColor} />
+                        </View>
+                        <Text style={[styles.menuListText, { color: textColor }]}>
+                            {language === 'Tamil' ? 'விலை நிர்ணயம்' : 'Set Prices'}
+                        </Text>
+                        <Feather name="chevron-right" size={18} color={subTextColor} />
+                    </TouchableOpacity>
+                </View>
 
                 <TouchableOpacity 
                     style={[styles.saveBtn, { backgroundColor: primaryColor }]} 
@@ -278,5 +314,33 @@ const styles = StyleSheet.create({
         shadowRadius: 15,
         shadowOffset: { width: 0, height: 10 },
     },
-    saveBtnText: { color: '#FFF', fontSize: moderateScale(18), fontWeight: '900', letterSpacing: 0.5 }
+    saveBtnText: { color: '#FFF', fontSize: moderateScale(18), fontWeight: '900', letterSpacing: 0.5 },
+    sectionCardTitle: {
+        fontSize: moderateScale(17),
+        fontWeight: '800',
+        marginBottom: verticalScale(16),
+        letterSpacing: -0.3,
+    },
+    menuListItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: verticalScale(12),
+    },
+    menuIconBox: {
+        width: scale(38),
+        height: scale(38),
+        borderRadius: scale(10),
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: scale(14),
+    },
+    menuListText: {
+        flex: 1,
+        fontSize: moderateScale(15),
+        fontWeight: '700',
+    },
+    menuDivider: {
+        height: 1,
+        width: '100%',
+    },
 });

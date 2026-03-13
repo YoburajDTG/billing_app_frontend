@@ -1,9 +1,5 @@
-import { Redirect } from 'expo-router';
-import { View, ActivityIndicator } from 'react-native';
-import { useAppTheme } from '@/context/ThemeContext';
+import SplashScreen from '@/components/SplashScreen';
 
 export default function Index() {
-    const { isDark } = useAppTheme();
-
-    return <Redirect href="/shop/dashboard" />;
+    return <SplashScreen />;
 }

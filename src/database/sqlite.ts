@@ -97,6 +97,7 @@ class SQLiteService {
       // Manual migrations for existing tables that might be missing columns
       await this.ensureColumnExists('vegetables', 'wholesale_price', 'REAL DEFAULT 0');
       await this.ensureColumnExists('vegetables', 'retail_price', 'REAL DEFAULT 0');
+      await this.ensureColumnExists('vegetables', 'price', 'REAL DEFAULT 0');
       await this.ensureColumnExists('users', 'shop_name', 'TEXT');
       await this.ensureColumnExists('users', 'phone', 'TEXT');
       await this.ensureColumnExists('users', 'address', 'TEXT');
@@ -139,13 +140,14 @@ class SQLiteService {
           id TEXT PRIMARY KEY,
           bill_id TEXT NOT NULL,
           vegetable_id TEXT NOT NULL,
+          name TEXT,
+          tamil_name TEXT,
           quantity REAL NOT NULL,
           unit_price REAL NOT NULL,
           total_price REAL NOT NULL,
           unit TEXT DEFAULT 'kg',
           created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE,
-          FOREIGN KEY (vegetable_id) REFERENCES vegetables(id) ON DELETE CASCADE
+          FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE
         );
       `);
 
@@ -170,6 +172,8 @@ class SQLiteService {
       await this.ensureColumnExists('bills', 'updated_at', 'TEXT DEFAULT CURRENT_TIMESTAMP');
 
       await this.ensureColumnExists('bill_items', 'unit', "TEXT DEFAULT 'kg'");
+      await this.ensureColumnExists('bill_items', 'name', "TEXT");
+      await this.ensureColumnExists('bill_items', 'tamil_name', "TEXT");
       await this.ensureColumnExists('bill_items', 'created_at', 'TEXT DEFAULT CURRENT_TIMESTAMP');
 
       // Indexes (one per execAsync call for expo-sqlite/next compatibility)

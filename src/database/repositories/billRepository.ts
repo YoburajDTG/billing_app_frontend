@@ -31,12 +31,14 @@ export const billRepository = {
                 for (const item of items) {
                     const itemId = generateId();
                     await txn.runAsync(
-                        `INSERT INTO bill_items (id, bill_id, vegetable_id, quantity, unit_price, total_price, unit, created_at)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                        `INSERT INTO bill_items (id, bill_id, vegetable_id, name, tamil_name, quantity, unit_price, total_price, unit, created_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                         [
                             itemId,
                             billId,
                             item.vegetable_id,
+                            item.name || null,
+                            item.tamil_name || null,
                             item.quantity,
                             item.unit_price,
                             item.total_price,
@@ -93,9 +95,11 @@ export const billRepository = {
             }
 
             const items = await sqliteService.query<BillItem & { name: string, tamil_name: string }>(
-                `SELECT bi.*, v.name, v.tamil_name 
+                `SELECT bi.*, 
+                 COALESCE(bi.name, v.name) as name, 
+                 COALESCE(bi.tamil_name, v.tamil_name) as tamil_name 
                  FROM bill_items bi
-                 JOIN vegetables v ON bi.vegetable_id = v.id
+                 LEFT JOIN vegetables v ON bi.vegetable_id = v.id
                  WHERE bi.bill_id = ?`,
                 [billId]
             );
@@ -133,13 +137,14 @@ export const billRepository = {
         }
     },
 
-    async getBillsForDateRange(startDate: string, endDate: string): Promise<Bill[]> {
+    async getBillsForDateRange(startDate: string, endDate: string): Promise<(Bill & { itemCount: number })[]> {
         try {
-            const bills = await sqliteService.query<Bill>(
-                `SELECT id, total_amount, discount, customer_name, created_at
-                 FROM bills
-                 WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
-                 ORDER BY created_at DESC`,
+            const bills = await sqliteService.query<Bill & { itemCount: number }>(
+                `SELECT b.id, b.total_amount, b.discount, b.customer_name, b.created_at,
+                 (SELECT COUNT(*) FROM bill_items WHERE bill_id = b.id) as itemCount
+                 FROM bills b
+                 WHERE DATE(b.created_at) BETWEEN DATE(?) AND DATE(?)
+                 ORDER BY b.created_at DESC`,
                 [startDate, endDate]
             );
             return bills;

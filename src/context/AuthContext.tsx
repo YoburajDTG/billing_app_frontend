@@ -21,8 +21,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Default offline user configuration
 const DEFAULT_OFFLINE_USER: User = {
-    username: 'Offline User',
-    role: 'shopkeeper',
+    username: 'Owner',
+    role: 'admin',
     shopName: 'சுஜி காய்கறிகள்',
 };
 
