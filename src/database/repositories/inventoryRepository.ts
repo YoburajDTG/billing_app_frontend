@@ -42,20 +42,29 @@ export const inventoryRepository = {
         }
     },
 
-    async getLatestPrices(): Promise<Inventory[]> {
+    async getLatestPrices(): Promise<any[]> {
         try {
-            // SQLite version - get the latest price for each vegetable
-            const inventory = await sqliteService.query<Inventory & { name: string, tamil_name: string, category: string, wholesale_price: number, retail_price: number }>(
-                `SELECT i.*, v.name, v.tamil_name, v.category, v.wholesale_price, v.retail_price 
-                 FROM (
+            // Updated to LEFT JOIN to ensure all vegetables are returned
+            // and use COALESCE to handle nulls from missing inventory records
+            const result = await sqliteService.query<any>(
+                `SELECT 
+                    v.id, 
+                    v.name, 
+                    v.tamil_name, 
+                    v.category, 
+                    v.wholesale_price, 
+                    v.retail_price,
+                    v.price as base_price,
+                    i.price as last_logged_price,
+                    i.date as last_logged_date
+                 FROM vegetables v
+                 LEFT JOIN (
                     SELECT *, ROW_NUMBER() OVER (PARTITION BY vegetable_id ORDER BY date DESC, created_at DESC) as rn
                     FROM inventory
-                 ) i
-                 JOIN vegetables v ON i.vegetable_id = v.id
-                 WHERE i.rn = 1 
-                 ORDER BY i.created_at DESC`
+                 ) i ON v.id = i.vegetable_id AND i.rn = 1
+                 ORDER BY v.name ASC`
             );
-            return inventory;
+            return result;
         } catch (error) {
             console.error('Error fetching latest prices:', error);
             throw error;

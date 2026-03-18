@@ -1,11 +1,11 @@
 import { useAppTheme } from '@/context/ThemeContext';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ShopLayout() {
-    const { theme, isDark, language } = useAppTheme();
+    const { isDark, language } = useAppTheme();
     const insets = useSafeAreaInsets();
 
     return (
@@ -102,6 +102,13 @@ export default function ShopLayout() {
 
             <Tabs.Screen
                 name="prices"
+                options={{
+                    href: null,
+                }}
+            />
+
+            <Tabs.Screen
+                name="function-bill"
                 options={{
                     href: null,
                 }}

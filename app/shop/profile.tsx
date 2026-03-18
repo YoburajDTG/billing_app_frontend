@@ -5,7 +5,6 @@ import React, { useEffect, useState } from 'react';
 import {
     Alert,
     Image,
-    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -30,6 +29,7 @@ export default function MerchantProfileScreen() {
     const [merchantName, setMerchantName] = useState('');
     const [merchantLogo, setMerchantLogo] = useState('');
     const [merchantNumber, setMerchantNumber] = useState('');
+    const [mobileError, setMobileError] = useState(false);
 
     useEffect(() => {
         loadProfile();
@@ -54,6 +54,18 @@ export default function MerchantProfileScreen() {
         }
     };
 
+    const isValidMobile = (num: string) => /^[6-9]\d{9}$/.test(num.trim());
+
+    const handleMobileChange = (value: string) => {
+        const digits = value.replace(/\D/g, '').slice(0, 10);
+        setMerchantNumber(digits);
+        if (digits.length > 0) {
+            setMobileError(!isValidMobile(digits));
+        } else {
+            setMobileError(false);
+        }
+    };
+
     const pickImage = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
@@ -74,10 +86,23 @@ export default function MerchantProfileScreen() {
     };
 
     const saveProfile = async () => {
-        if (!merchantName.trim()) {
-            Alert.alert(language === 'Tamil' ? 'சரிபார்ப்பு' : "Validation", language === 'Tamil' ? 'கடை பெயர் தேவை' : "Shop name is required");
+        if (merchantName.trim().length < 3) {
+            Alert.alert(
+                language === 'Tamil' ? 'சரிபார்ப்பு' : "Validation", 
+                language === 'Tamil' ? 'கடை பெயர் குறைந்தது 3 எழுத்துக்கள் இருக்க வேண்டும்' : "Shop name must be at least 3 characters"
+            );
             return;
         }
+
+        if (merchantNumber.trim() && !isValidMobile(merchantNumber)) {
+            Alert.alert(
+                language === 'Tamil' ? 'பிழை' : "Invalid Mobile", 
+                language === 'Tamil' ? 'சரியான 10 இலக்க எண்ணை உள்ளிடவும்' : "Please enter a valid 10-digit mobile number"
+            );
+            setMobileError(true);
+            return;
+        }
+
         setLoading(true);
         try {
             await Promise.all([
@@ -88,7 +113,7 @@ export default function MerchantProfileScreen() {
 
             Alert.alert(language === 'Tamil' ? 'வெற்றி' : "Success", language === 'Tamil' ? 'விவரங்கள் சேமிக்கப்பட்டன!' : "Profile updated successfully!");
             router.back();
-        } catch (error) {
+        } catch {
             Alert.alert(language === 'Tamil' ? 'பிழை' : "Error", language === 'Tamil' ? 'சுயவிவர மாற்றங்களைச் சேமிப்பதில் தோல்வி.' : "Failed to save profile changes.");
         } finally {
             setLoading(false);
@@ -140,13 +165,26 @@ export default function MerchantProfileScreen() {
                     <View style={styles.inputWrapper}>
                         <Text style={[styles.inputLabel, { color: subTextColor }]}>{language === 'Tamil' ? 'தொடர்பு எண்' : 'Contact Number'}</Text>
                         <TextInput
-                            style={[styles.input, { color: textColor, borderColor: isDark ? '#333' : '#E2E8F0', backgroundColor: isDark ? '#2C2C2C' : '#F8FAFC' }]}
+                            style={[
+                                styles.input, 
+                                { 
+                                    color: textColor, 
+                                    borderColor: mobileError ? '#EF4444' : (isDark ? '#333' : '#E2E8F0'), 
+                                    backgroundColor: isDark ? '#2C2C2C' : '#F8FAFC' 
+                                }
+                            ]}
                             value={merchantNumber}
-                            onChangeText={setMerchantNumber}
+                            onChangeText={handleMobileChange}
                             placeholder={language === 'Tamil' ? '90959 38085' : "e.g. 90959 38085"}
                             placeholderTextColor="#94A3B8"
                             keyboardType="phone-pad"
+                            maxLength={10}
                         />
+                        {mobileError && (
+                            <Text style={styles.errorText}>
+                                {language === 'Tamil' ? 'சரியான 10 இலக்க எண்ணை உள்ளிடவும்' : 'Enter valid 10-digit number'}
+                            </Text>
+                        )}
                     </View>
 
                     <View style={styles.inputWrapper}>
@@ -342,5 +380,12 @@ const styles = StyleSheet.create({
     menuDivider: {
         height: 1,
         width: '100%',
+    },
+    errorText: {
+        color: '#EF4444',
+        fontSize: moderateScale(11),
+        fontWeight: '700',
+        marginTop: verticalScale(4),
+        marginLeft: scale(4),
     },
 });

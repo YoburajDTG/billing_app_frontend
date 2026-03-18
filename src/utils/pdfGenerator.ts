@@ -1,5 +1,6 @@
 import * as Print from 'expo-print';
 import { shareAsync } from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
 
 type BillData = {
   shopName: string;
@@ -8,13 +9,13 @@ type BillData = {
   phone?: string;
   address?: string;
   date: string;
-  items: Array<{
+  items: {
     name: string;
     quantity: number;
     price: number;
     discount?: number;
     total: number;
-  }>;
+  }[];
   subTotal: number;
   discount?: number;
   grandTotal: number;
@@ -22,7 +23,8 @@ type BillData = {
   language?: 'English' | 'Tamil';
 };
 
-export const generateBillPDF = async (data: BillData) => {
+export const generateBillPDF = async (data: BillData, options: { printDirect?: boolean } = {}) => {
+
   const html = `
     <html>
       <head>
@@ -60,28 +62,28 @@ export const generateBillPDF = async (data: BillData) => {
           .summary-row { display: flex; justify-content: space-between; padding: 1px 0; font-size: 10px; font-weight: 600; }
           .total-row { padding-top: 3px; border-top: 1px solid #000; margin-top: 3px; font-size: 13px; font-weight: 800; }
           
-          .footer { margin-top: 12px; text-align: center; font-size: 10px; font-weight: 700; border-top: 1px dashed #000; padding-top: 6px; }
+          .footer { margin-top: 6px; text-align: center; font-size: 10px; font-weight: 700; border-top: 1px dashed #000; padding-top: 4px; }
         </style>
       </head>
       <body>
         <div class="header">
-          <div class="shop-name">${data.shopName}</div>
-          <div class="shop-address">${data.address || 'பாண்டி - திண்டிவனம் மெயின் ரோடு, கிளியனூர்.'}</div>
-          <div class="shop-phone">${data.language === 'Tamil' ? 'தொலைபேசி' : 'Phone'}: ${data.phone || '9095938085'}</div>
+          <div class="shop-name">சுஜி காய்கறி கடை</div>
+          <div class="shop-address">பாண்டி - திண்டிவனம் மெயின் ரோடு, கிளியனூர்.</div>
+          <div class="shop-phone">Phone: ${data.phone || '9095938085'}</div>
         </div>
         
         <div class="bill-meta">
-          <div><b>${data.language === 'Tamil' ? 'தேதி' : 'Date'}:</b> ${data.date}</div>
-          <div><b>${data.language === 'Tamil' ? 'ரசீது எண்' : 'No'}:</b> ${data.billNumber.slice(-8)}</div>
-          <div><b>${data.language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Cust'}:</b> ${data.userName}</div>
+          <div><b>Date:</b> ${data.date}</div>
+          <div><b>Bill No:</b> ${data.billNumber}</div>
+          <div><b>Customer:</b> ${data.userName}</div>
         </div>
 
         <table>
           <thead>
             <tr>
-              <th style="width: 45%;">${data.language === 'Tamil' ? 'பொருள்' : 'ITEM'}</th>
-              <th class="text-center">${data.language === 'Tamil' ? 'அளவு' : 'QTY'}</th>
-              <th class="text-right">${data.language === 'Tamil' ? 'மொத்தம்' : 'TOTAL'}</th>
+              <th style="width: 45%;">Item</th>
+              <th class="text-center">Qty</th>
+              <th class="text-right">Total</th>
             </tr>
           </thead>
           <tbody>
@@ -97,16 +99,16 @@ export const generateBillPDF = async (data: BillData) => {
 
         <div class="summary-table">
           <div class="summary-row">
-            <span>${data.language === 'Tamil' ? 'சிறுது தொகை' : 'Sub-Total'}:</span>
+            <span>Sub-Total:</span>
             <span>₹${data.subTotal.toFixed(0)}</span>
           </div>
           ${data.discount ? `
           <div class="summary-row">
-            <span>${data.language === 'Tamil' ? 'தள்ளுபடி' : 'Discount'}:</span>
+            <span>Discount:</span>
             <span>- ₹${data.discount.toFixed(0)}</span>
           </div>` : ''}
           <div class="summary-row total-row">
-            <span>${data.language === 'Tamil' ? 'மொத்தம்' : 'GRAND TOTAL'}:</span>
+            <span>Grand Total:</span>
             <span>₹${data.grandTotal.toFixed(0)}</span>
           </div>
         </div>
@@ -118,19 +120,36 @@ export const generateBillPDF = async (data: BillData) => {
     </html>
   `;
 
-  // Calculate approximate height for thermal roll (58mm width)
-  // Tightened to reduce excessive bottom white space
-  const estimatedHeight = 180 + (data.items.length * 30);
+  // Tighter height calculation for 58mm thermal roll to eliminate bottom white space
+  const estimatedHeight = 130 + (data.items.length * 24);
 
   try {
-    const { uri } = await Print.printToFileAsync({ 
-      html,
-      width: 155, // Adjusted to remove right white space
-      height: estimatedHeight,
-    });
-    console.log('File has been saved to:', uri);
-    await shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+    if (options.printDirect) {
+      await Print.printAsync({
+        html,
+        width: 164, // Standard 58mm (164pt) width for thermal printers
+        height: estimatedHeight,
+      });
+    } else {
+      // Build a clean filename: "Suji_Bill_<billNumber>.pdf"
+      const safeBillNumber = data.billNumber.replace(/[^a-zA-Z0-9_\-]/g, '_');
+      const fileName = `Suji_Bill_${safeBillNumber}.pdf`;
+
+      const { uri } = await Print.printToFileAsync({
+        html,
+        width: 164, // Standard 58mm (164pt) width for thermal printers
+        height: estimatedHeight,
+      });
+
+      // Rename the temp file to the desired filename
+      const destUri = `${FileSystem.cacheDirectory}${fileName}`;
+      await FileSystem.moveAsync({ from: uri, to: destUri });
+
+      console.log('File has been saved to:', destUri);
+      await shareAsync(destUri, { UTI: '.pdf', mimeType: 'application/pdf' });
+    }
   } catch (error) {
-    console.error('Error generating PDF:', error);
+    console.error('Error generating/printing bill:', error);
   }
 };
+

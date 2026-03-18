@@ -6,9 +6,25 @@ export const billRepository = {
     async createBill(bill: Omit<Bill, 'id' | 'created_at'>, items: Omit<BillItem, 'id' | 'bill_id'>[]): Promise<Bill> {
         try {
             const newBill = await sqliteService.transaction(async (txn) => {
-                // 1. Insert the bill
-                const billId = generateId();
-                const createdAt = new Date().toISOString();
+                // 1. Generate sequence-based Bill ID (Format: BILL001Y26)
+                const now = new Date();
+                const yearSuffix = now.getFullYear().toString().slice(-2);
+                
+                const lastBill = await txn.getFirstAsync<{ id: string }>(
+                    `SELECT id FROM bills WHERE id LIKE 'BILL%Y${yearSuffix}' ORDER BY id DESC LIMIT 1`
+                );
+
+                let nextSeq = 1;
+                if (lastBill) {
+                    const match = lastBill.id.match(/BILL(\d+)Y/);
+                    if (match) {
+                        nextSeq = parseInt(match[1], 10) + 1;
+                    }
+                }
+
+                const paddedSeq = nextSeq.toString().padStart(3, '0');
+                const billId = `BILL${paddedSeq}Y${yearSuffix}`;
+                const createdAt = now.toISOString();
 
                 await txn.runAsync(
                     `INSERT INTO bills (id, total_amount, discount, tax, customer_name, payment_method, notes, mode, created_at, updated_at)
@@ -134,6 +150,30 @@ export const billRepository = {
         } catch (error) {
             console.error('Error calculating total amount:', error);
             throw error;
+        }
+    },
+
+    async getNextBillId(): Promise<string> {
+        try {
+            const now = new Date();
+            const yearSuffix = now.getFullYear().toString().slice(-2);
+            const lastBill = await sqliteService.queryOne<{ id: string }>(
+                `SELECT id FROM bills WHERE id LIKE 'BILL%Y${yearSuffix}' ORDER BY id DESC LIMIT 1`
+            );
+
+            let nextSeq = 1;
+            if (lastBill) {
+                const match = lastBill.id.match(/BILL(\d+)Y/);
+                if (match) {
+                    nextSeq = parseInt(match[1], 10) + 1;
+                }
+            }
+
+            const paddedSeq = nextSeq.toString().padStart(3, '0');
+            return `BILL${paddedSeq}Y${yearSuffix}`;
+        } catch (error) {
+            console.error('Error getting next bill ID:', error);
+            return `BILL-ERROR`;
         }
     },
 

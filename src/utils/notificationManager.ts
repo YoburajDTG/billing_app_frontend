@@ -1,14 +1,3 @@
-// import * as Notifications from 'expo-notifications'; // Disabled for environment compatibility
-import { Platform } from 'react-native';
-
-// Mock implementation to avoid bundling errors if library is missing
-const Notifications: any = {
-    setNotificationHandler: () => { },
-    getPermissionsAsync: async () => ({ status: 'granted' }),
-    requestPermissionsAsync: async () => ({ status: 'granted' }),
-    cancelAllScheduledNotificationsAsync: async () => { },
-    scheduleNotificationAsync: async () => 'mock-id',
-};
 
 export const NotificationManager = {
     requestPermissions: async () => {

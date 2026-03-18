@@ -6,7 +6,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -28,17 +28,35 @@ export default function BillingHistoryScreen() {
   const [loading, setLoading] = useState(true);
   const [selectedBill, setSelectedBill] = useState<any>(null);
   const [previewVisible, setPreviewVisible] = useState(false);
-  const [startDate, setStartDate] = useState(new Date(new Date().setDate(new Date().getDate() - 7)).toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
-  const { t, isDark, language } = useAppTheme();
+  const [selectedFilter, setSelectedFilter] = useState('Today');
+  const { isDark, language } = useAppTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  useEffect(() => {
-    fetchHistory();
-  }, [startDate, endDate]);
+  const fetchHistory = useCallback(async () => {
+    // Basic validation for date format (YYYY-MM-DD)
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(startDate) || !dateRegex.test(endDate)) {
+      if (selectedFilter === 'Custom' && (startDate.length < 10 || endDate.length < 10)) {
+        // Still typing
+        return;
+      }
+      return;
+    }
 
-  const fetchHistory = async () => {
+    if (new Date(startDate) > new Date(endDate)) {
+        // Only alert if both are full length to avoid annoying user while typing
+        if (startDate.length === 10 && endDate.length === 10) {
+            Alert.alert(
+                language === 'Tamil' ? 'பிழை' : 'Invalid Range',
+                language === 'Tamil' ? 'தொடக்க தேதி முடிவு தேதிக்கு முன் இருக்க வேண்டும்' : 'Start date must be before end date'
+            );
+        }
+        return;
+    }
+
     setLoading(true);
     try {
       const response = await billDbService.getHistoryByDateRange(startDate, endDate);
@@ -51,12 +69,38 @@ export default function BillingHistoryScreen() {
         itemCount: bill.itemCount || 0,
       }));
       setHistory(bills);
-    } catch (error) {
-      console.error("Fetch history error:", error);
-      Alert.alert("Error", "Failed to fetch billing history.");
+    } catch {
+      // silent
     } finally {
       setLoading(false);
     }
+  }, [startDate, endDate, language, selectedFilter]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
+  const applyFilter = (filter: string) => {
+    Haptics.selectionAsync();
+    setSelectedFilter(filter);
+    const today = new Date();
+    let start = new Date();
+    const end = new Date();
+
+    if (filter === 'Today') {
+      start = today;
+    } else if (filter === 'Last Week') {
+      start.setDate(today.getDate() - 7);
+    } else if (filter === 'Last Month') {
+      start.setMonth(today.getMonth() - 1);
+    } else if (filter === 'Last Year') {
+      start.setFullYear(today.getFullYear() - 1);
+    } else {
+      return; // Custom range, don't auto-update
+    }
+
+    setStartDate(start.toISOString().split('T')[0]);
+    setEndDate(end.toISOString().split('T')[0]);
   };
 
   const handleDownloadPdf = async (billId: string) => {
@@ -206,29 +250,67 @@ export default function BillingHistoryScreen() {
           </View>
         </View>
 
-        {/* Date Filter Controls */}
-        <View style={styles.filterRow}>
-           <View style={styles.dateInputContainer}>
-              <Text style={styles.dateLabel}>{language === 'Tamil' ? 'தொடக்கம்' : 'From'}</Text>
-              <TextInput
-                style={[styles.dateInput, { backgroundColor: isDark ? '#2C2C2E' : 'rgba(255,255,255,0.2)', color: '#FFF' }]}
-                value={startDate}
-                onChangeText={setStartDate}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor="rgba(255,255,255,0.5)"
-              />
-           </View>
-           <View style={styles.dateInputContainer}>
-              <Text style={styles.dateLabel}>{language === 'Tamil' ? 'முடிவு' : 'To'}</Text>
-              <TextInput
-                style={[styles.dateInput, { backgroundColor: isDark ? '#2C2C2E' : 'rgba(255,255,255,0.2)', color: '#FFF' }]}
-                value={endDate}
-                onChangeText={setEndDate}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor="rgba(255,255,255,0.5)"
-              />
-           </View>
-        </View>
+        {/* Quick Filter Chips */}
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false} 
+          style={styles.filterScroll}
+          contentContainerStyle={styles.filterScrollContent}
+        >
+          {['Today', 'Last Week', 'Last Month', 'Last Year', 'Custom'].map((filter) => (
+            <TouchableOpacity
+              key={filter}
+              onPress={() => applyFilter(filter)}
+              style={[
+                styles.filterChip,
+                { 
+                  backgroundColor: selectedFilter === filter ? '#FFF' : 'rgba(255,255,255,0.15)',
+                  borderColor: selectedFilter === filter ? '#FFF' : 'transparent'
+                }
+              ]}
+            >
+              <Text 
+                style={[
+                  styles.filterChipText, 
+                  { color: selectedFilter === filter ? '#FF8C00' : '#FFF' }
+                ]}
+              >
+                {language === 'Tamil' ? (
+                  filter === 'Today' ? 'இன்று' :
+                  filter === 'Last Week' ? 'கடந்த வாரம்' :
+                  filter === 'Last Month' ? 'கடந்த மாதம்' :
+                  filter === 'Last Year' ? 'கடந்த ஆண்டு' : 'சொந்த தேதி'
+                ) : filter}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {/* Date Filter Controls - Only show inputs if Custom is selected or for clarity */}
+        {selectedFilter === 'Custom' && (
+          <Animated.View entering={FadeInDown} style={styles.filterRow}>
+            <View style={styles.dateInputContainer}>
+                <Text style={styles.dateLabel}>{language === 'Tamil' ? 'தொடக்கம்' : 'From'}</Text>
+                <TextInput
+                  style={[styles.dateInput, { backgroundColor: isDark ? '#2C2C2E' : 'rgba(255,255,255,0.2)', color: '#FFF' }]}
+                  value={startDate}
+                  onChangeText={setStartDate}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor="rgba(255,255,255,0.5)"
+                />
+            </View>
+            <View style={styles.dateInputContainer}>
+                <Text style={styles.dateLabel}>{language === 'Tamil' ? 'முடிவு' : 'To'}</Text>
+                <TextInput
+                  style={[styles.dateInput, { backgroundColor: isDark ? '#2C2C2E' : 'rgba(255,255,255,0.2)', color: '#FFF' }]}
+                  value={endDate}
+                  onChangeText={setEndDate}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor="rgba(255,255,255,0.5)"
+                />
+            </View>
+          </Animated.View>
+        )}
       </LinearGradient>
 
       {loading ? (
@@ -391,7 +473,7 @@ export default function BillingHistoryScreen() {
                     {language === 'Tamil' ? 'கூட்டுத் தொகை' : 'Subtotal'}
                   </Text>
                   <Text style={[styles.totalValue, { color: textColor }]}>
-                    ₹{(selectedBill?.total_amount || 0).toFixed(2)}
+                    ₹{((selectedBill?.total_amount || 0) + (selectedBill?.discount || 0)).toFixed(2)}
                   </Text>
                 </View>
                 {selectedBill?.discount > 0 && (
@@ -416,7 +498,7 @@ export default function BillingHistoryScreen() {
                   <Text
                     style={[styles.grandTotalValue, { color: primaryColor }]}
                   >
-                    ₹{((selectedBill?.total_amount || 0) - (selectedBill?.discount || 0)).toFixed(0)}
+                    ₹{(selectedBill?.total_amount || 0).toFixed(0)}
                   </Text>
                 </View>
               </View>
@@ -456,9 +538,26 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: scale(32),
     borderBottomRightRadius: scale(32),
   },
+  filterScroll: {
+    marginTop: verticalScale(15),
+  },
+  filterScrollContent: {
+    gap: scale(10),
+    paddingRight: scale(20),
+  },
+  filterChip: {
+    paddingHorizontal: scale(16),
+    paddingVertical: verticalScale(8),
+    borderRadius: scale(20),
+    borderWidth: 1,
+  },
+  filterChipText: {
+    fontSize: moderateScale(12),
+    fontWeight: '800',
+  },
   filterRow: {
     flexDirection: 'row',
-    marginTop: verticalScale(20),
+    marginTop: verticalScale(15),
     gap: scale(12),
   },
   dateInputContainer: {

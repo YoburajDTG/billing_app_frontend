@@ -5,7 +5,7 @@ import { moderateScale, scale, verticalScale } from '@/utils/responsive';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
     ActivityIndicator,
     Modal,
@@ -20,6 +20,20 @@ import {
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+
+const TAMIL_QUOTES = [
+    "இன்று செய்த உழைப்பு நாளைய வெற்றியை உருவாக்கும்.",
+    "சின்ன முன்னேற்றமும் பெரிய வெற்றிக்கான முதல் படி.",
+    "நம்பிக்கை இருந்தால் முடியாதது எதுவும் இல்லை.",
+    "உழைப்பே உயர்வின் ஒரே வழி.",
+    "தோல்வி என்பது வெற்றிக்கான பாடம்.",
+    "நேரத்தை மதித்தால் வாழ்க்கை உன்னை மதிக்கும்.",
+    "இன்று தொடங்கு, நாளை வெற்றி உன்னுடையது.",
+    "தொடர்ந்த முயற்சி தான் வெற்றியின் ரகசியம்.",
+    "நீ நினைத்ததை நீ சாதிக்க முடியும்.",
+    "கஷ்டம் இல்லாமல் கண்ணீர் இல்லாமல் வெற்றி இல்லை."
+];
+
 
 export default function DashboardScreen() {
     const [loading, setLoading] = useState(true);
@@ -38,6 +52,9 @@ export default function DashboardScreen() {
     const { user } = useAuth();
     const insets = useSafeAreaInsets();
     const router = useRouter();
+
+    const quote = TAMIL_QUOTES[(new Date().getFullYear() + new Date().getMonth() + new Date().getDate()) % TAMIL_QUOTES.length];
+
 
     useFocusEffect(
         useCallback(() => {
@@ -96,6 +113,11 @@ export default function DashboardScreen() {
     const handleNewBill = (mode: 'retail' | 'wholesale') => {
         setShowTypeModal(false);
         router.push({ pathname: '/shop', params: { mode, timestamp: Date.now() } });
+    };
+
+    const handleFunctionBill = () => {
+        setShowTypeModal(false);
+        router.push('/shop/function-bill');
     };
 
     const getGreeting = () => {
@@ -225,6 +247,32 @@ export default function DashboardScreen() {
                 </LinearGradient>
 
                 <View style={styles.body}>
+                    {/* ── DAILY MOTIVATION ── */}
+                    <Animated.View 
+                        entering={FadeInUp.delay(150).duration(600)} 
+                        style={[
+                            styles.quoteCard, 
+                            { 
+                                backgroundColor: isDark ? '#1C1C1E' : '#FFF9F0', 
+                                borderColor: isDark ? '#2C2C2E' : '#FDE68A' 
+                            }
+                        ]}
+                    >
+                        <MaterialCommunityIcons 
+                            name="format-quote-open" 
+                            size={20} 
+                            color={primary} 
+                            style={{ opacity: 0.3, position: 'absolute', top: 10, left: 10 }} 
+                        />
+                        <Text style={[styles.quoteText, { color: textCol }]}>{quote}</Text>
+                        <MaterialCommunityIcons 
+                            name="format-quote-close" 
+                            size={20} 
+                            color={primary} 
+                            style={{ opacity: 0.3, position: 'absolute', bottom: 10, right: 10 }} 
+                        />
+                    </Animated.View>
+
                     {/* ── QUICK STATS (Customers & Products) ── */}
                     <Animated.View entering={FadeInUp.delay(200).duration(400)} style={styles.quickStatsRow}>
                         <View style={[styles.quickStatCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
@@ -301,6 +349,18 @@ export default function DashboardScreen() {
                                 </View>
                                 <Text style={[styles.actionTitle, { color: textCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'ரசீது வரலாறு' : 'History'}</Text>
                                 <Text style={[styles.actionDesc, { color: subCol }]}>{language === 'Tamil' ? 'அனைத்து ரசீதுகள்' : 'All invoices'}</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[styles.actionCard, { backgroundColor: isDark ? '#252525' : '#F5F3FF', borderWidth: 1, borderColor: '#8B5CF650' }]}
+                                onPress={handleFunctionBill}
+                                activeOpacity={0.85}
+                            >
+                                <View style={[styles.actionIconBox, { backgroundColor: '#8B5CF620' }]}>
+                                    <MaterialCommunityIcons name="party-popper" size={26} color="#8B5CF6" />
+                                </View>
+                                <Text style={[styles.actionTitle, { color: textCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'விழா பில்' : 'Function Bill'}</Text>
+                                <Text style={[styles.actionDesc, { color: subCol }]}>{language === 'Tamil' ? 'திருமணம் & நிகழ்வு' : 'Marriage & Events'}</Text>
                             </TouchableOpacity>
                         </View>
                     </Animated.View>
@@ -421,6 +481,18 @@ export default function DashboardScreen() {
                                 </View>
                                 <Text style={[styles.typeBtnTitle, { color: textCol }]}>{language === 'Tamil' ? 'மொத்த விற்பனை' : 'Wholesale'}</Text>
                                 <Text style={styles.typeBtnDesc}>{language === 'Tamil' ? 'மொத்த விலை' : 'Bulk Rates'}</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[styles.typeBtn, { backgroundColor: isDark ? '#252525' : '#F5F3FF', borderColor: '#8B5CF650' }]}
+                                onPress={handleFunctionBill}
+                                activeOpacity={0.85}
+                            >
+                                <View style={[styles.typeIconBox, { backgroundColor: '#8B5CF6' }]}>
+                                    <MaterialCommunityIcons name="party-popper" size={28} color="#FFF" />
+                                </View>
+                                <Text style={[styles.typeBtnTitle, { color: textCol }]}>{language === 'Tamil' ? 'விழா பில்' : 'Function Bill'}</Text>
+                                <Text style={styles.typeBtnDesc}>{language === 'Tamil' ? 'திருமணம் & நிகழ்வு' : 'Marriage & Events'}</Text>
                             </TouchableOpacity>
                         </View>
                     </Animated.View>
@@ -820,4 +892,29 @@ const styles = StyleSheet.create({
         color: '#9CA3AF',
         fontWeight: '600',
     },
+    quoteCard: {
+        paddingVertical: verticalScale(22),
+        paddingHorizontal: scale(25),
+        borderRadius: scale(20),
+        marginBottom: verticalScale(20),
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.05,
+        shadowRadius: 10,
+        position: 'relative',
+        overflow: 'hidden',
+    },
+    quoteText: {
+        fontSize: moderateScale(15),
+        fontWeight: '700',
+        textAlign: 'center',
+        fontStyle: 'italic',
+        lineHeight: moderateScale(22),
+        paddingHorizontal: scale(10),
+    },
 });
+

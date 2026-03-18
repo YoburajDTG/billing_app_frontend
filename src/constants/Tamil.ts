@@ -44,4 +44,5 @@ export const TAMIL = {
   // Success
   BILL_CREATED: "பில் வெற்றிகரமாக உருவாக்கப்பட்டது",
   USER_CREATED: "பயனர் வெற்றிகரமாக உருவாக்கப்பட்டார்",
+  ADD_ITEM: "பொருளைச் சேர்",
 };

@@ -12,8 +12,9 @@ module.exports = function (api) {
             "@assets": "./src/assets",
           },
         },
-      ],
-      "react-native-reanimated/plugin",
+      ],      
+      // Worklets plugin already wraps Reanimated’s plugin; avoid duplicates
+      "react-native-worklets/plugin",
     ],
   };
 };

@@ -4,7 +4,7 @@ import { Customer, customerRepository } from '@/database/repositories/customerRe
 import { moderateScale, scale, verticalScale } from '@/utils/responsive';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View, Platform, KeyboardAvoidingView } from 'react-native';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,15 +18,12 @@ export default function CustomersScreen() {
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
     const [address, setAddress] = useState('');
+    const [mobileError, setMobileError] = useState(false);
     const { isDark, language } = useAppTheme();
     const insets = useSafeAreaInsets();
     const router = useRouter();
 
-    useEffect(() => {
-        fetchCustomers();
-    }, []);
-
-    const fetchCustomers = async () => {
+    const fetchCustomers = useCallback(async () => {
         setIsLoading(true);
         try {
             const data = await customerRepository.getAll();
@@ -37,11 +34,39 @@ export default function CustomersScreen() {
         } finally {
             setIsLoading(false);
         }
+    }, [language]);
+
+    useEffect(() => {
+        fetchCustomers();
+    }, [fetchCustomers]);
+
+    const isValidMobile = (num: string) => /^[6-9]\d{9}$/.test(num.trim());
+
+    const handlePhoneChange = (value: string) => {
+        const digits = value.replace(/\D/g, '').slice(0, 10);
+        setPhone(digits);
+        if (digits.length > 0) {
+            setMobileError(!isValidMobile(digits));
+        } else {
+            setMobileError(false);
+        }
     };
 
     const handleSave = async () => {
-        if (!name.trim()) {
-            Alert.alert(language === 'Tamil' ? 'சரிபார்ப்பு பிழை' : 'Validation Error', language === 'Tamil' ? 'வாடிக்கையாளர் பெயர் அவசியம்' : 'Customer Name is required');
+        if (name.trim().length < 2) {
+            Alert.alert(
+                language === 'Tamil' ? 'சரிபார்ப்பு பிழை' : 'Validation Error', 
+                language === 'Tamil' ? 'வாடிக்கையாளர் பெயர் குறைந்தது 2 எழுத்துக்கள் இருக்க வேண்டும்' : 'Customer Name must be at least 2 characters'
+            );
+            return;
+        }
+
+        if (phone.trim() && !isValidMobile(phone)) {
+            Alert.alert(
+                language === 'Tamil' ? 'பிழை' : 'Invalid Phone', 
+                language === 'Tamil' ? 'சரியான 10 இலக்க எண்ணை உள்ளிடவும்' : 'Please enter a valid 10-digit phone number'
+            );
+            setMobileError(true);
             return;
         }
 
@@ -68,7 +93,7 @@ export default function CustomersScreen() {
                     try {
                         await customerRepository.delete(id);
                         fetchCustomers();
-                    } catch (e) {
+                    } catch {
                         Alert.alert(language === 'Tamil' ? 'பிழை' : 'Error', language === 'Tamil' ? 'வாடிக்கையாளரை நீக்குவதில் தோல்வி' : 'Failed to delete customer');
                     }
                 }
@@ -80,6 +105,7 @@ export default function CustomersScreen() {
         setName('');
         setPhone('');
         setAddress('');
+        setMobileError(false);
         setEditingCustomer(null);
     };
 
@@ -221,13 +247,26 @@ export default function CustomersScreen() {
                         <View style={styles.inputWrapper}>
                             <Text style={[styles.inputLabel, { color: subTextColor }]}>{language === 'Tamil' ? 'தொலைபேசி எண்' : 'Phone Number'}</Text>
                             <TextInput 
-                                style={[styles.input, { color: textColor, borderColor: isDark ? '#333' : '#E2E8F0', backgroundColor: isDark ? '#2C2C2C' : '#F8FAFC' }]} 
+                                style={[
+                                    styles.input, 
+                                    { 
+                                        color: textColor, 
+                                        borderColor: mobileError ? '#EF4444' : (isDark ? '#333' : '#E2E8F0'), 
+                                        backgroundColor: isDark ? '#2C2C2E' : '#F8FAFC' 
+                                    }
+                                ]} 
                                 value={phone} 
-                                onChangeText={setPhone} 
+                                onChangeText={handlePhoneChange} 
                                 keyboardType="phone-pad" 
                                 placeholder={language === 'Tamil' ? '10 இலக்க மொபைல் எண்' : "10-digit mobile number"}
                                 placeholderTextColor="#94A3B8"
+                                maxLength={10}
                             />
+                            {mobileError && (
+                                <Text style={styles.errorText}>
+                                    {language === 'Tamil' ? 'சரியான 10 இலக்க எண்ணை உள்ளிடவும்' : 'Enter valid 10-digit number'}
+                                </Text>
+                            )}
                         </View>
 
                         <View style={styles.inputWrapper}>
@@ -400,5 +439,12 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 6 }
     },
     closeSheetText: { fontSize: moderateScale(16), fontWeight: '700' },
-    saveSheetText: { color: '#FFF', fontSize: moderateScale(18), fontWeight: '800' }
+    saveSheetText: { color: '#FFF', fontSize: moderateScale(18), fontWeight: '800' },
+    errorText: {
+        color: '#EF4444',
+        fontSize: moderateScale(11),
+        fontWeight: '700',
+        marginTop: verticalScale(4),
+        marginLeft: scale(4),
+    },
 });
