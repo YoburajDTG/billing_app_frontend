@@ -27,14 +27,15 @@ export const billRepository = {
                 const createdAt = now.toISOString();
 
                 await txn.runAsync(
-                    `INSERT INTO bills (id, total_amount, discount, tax, customer_name, payment_method, notes, mode, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    `INSERT INTO bills (id, total_amount, discount, tax, customer_name, customer_mobile, payment_method, notes, mode, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                         billId,
                         bill.total_amount,
                         bill.discount || 0,
                         bill.tax || 0,
                         bill.customer_name || null,
+                        bill.customer_mobile || null,
                         'cash',
                         null,
                         bill.mode || 'Retail',
@@ -69,6 +70,7 @@ export const billRepository = {
                     total_amount: bill.total_amount,
                     discount: bill.discount || 0,
                     customer_name: bill.customer_name,
+                    customer_mobile: bill.customer_mobile,
                     created_at: createdAt
                 } as Bill;
             });
@@ -83,7 +85,7 @@ export const billRepository = {
     async getHistory(limit = 50): Promise<(Bill & { itemCount: number })[]> {
         try {
             const bills = await sqliteService.query<Bill & { itemCount: number }>(
-                `SELECT b.id, b.total_amount, b.discount, b.customer_name, b.created_at,
+                `SELECT b.id, b.total_amount, b.discount, b.customer_name, b.customer_mobile, b.created_at,
                  (SELECT COUNT(*) FROM bill_items WHERE bill_id = b.id) as itemCount
                  FROM bills b
                  ORDER BY b.created_at DESC 
@@ -100,7 +102,7 @@ export const billRepository = {
     async getBillWithItems(billId: string): Promise<{ bill: Bill; items: BillItem[] } | null> {
         try {
             const bill = await sqliteService.queryOne<Bill>(
-                `SELECT id, total_amount, discount, customer_name, created_at 
+                `SELECT id, total_amount, discount, customer_name, customer_mobile, created_at 
                  FROM bills 
                  WHERE id = ?`,
                 [billId]
@@ -130,7 +132,7 @@ export const billRepository = {
     async getBillById(billId: string): Promise<Bill | null> {
         try {
             return await sqliteService.queryOne<Bill>(
-                `SELECT id, total_amount, discount, customer_name, created_at 
+                `SELECT id, total_amount, discount, customer_name, customer_mobile, created_at 
                  FROM bills 
                  WHERE id = ?`,
                 [billId]
@@ -180,7 +182,7 @@ export const billRepository = {
     async getBillsForDateRange(startDate: string, endDate: string): Promise<(Bill & { itemCount: number })[]> {
         try {
             const bills = await sqliteService.query<Bill & { itemCount: number }>(
-                `SELECT b.id, b.total_amount, b.discount, b.customer_name, b.created_at,
+                `SELECT b.id, b.total_amount, b.discount, b.customer_name, b.customer_mobile, b.created_at,
                  (SELECT COUNT(*) FROM bill_items WHERE bill_id = b.id) as itemCount
                  FROM bills b
                  WHERE DATE(b.created_at) BETWEEN DATE(?) AND DATE(?)

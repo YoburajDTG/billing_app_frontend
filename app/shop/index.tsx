@@ -19,6 +19,7 @@ import {
   Alert,
   FlatList,
   Image,
+  Linking,
   Modal,
   Platform,
   SafeAreaView,
@@ -88,12 +89,21 @@ export default function ShopScreen() {
   const [qtyInput, setQtyInput] = useState("");
   const [priceInput, setPriceInput] = useState("");
   const [customerName, setCustomerName] = useState("");
+  const [customerMobile, setCustomerMobile] = useState("");
   const [discount, setDiscount] = useState(0);
+  const [nextBillId, setNextBillId] = useState("");
+  const [printerPreference, setPrinterPreference] = useState<'2inch' | '3inch'>('2inch');
 
   useEffect(() => {
     // Hide default header
     navigation.setOptions({ headerShown: false });
+    loadSettings();
   }, []);
+
+  const loadSettings = async () => {
+    const pSize = await Storage.getItem(KEYS.PRINTER_SIZE);
+    if (pSize) setPrinterPreference(pSize);
+  };
 
   useEffect(() => {
     if (mode) {
@@ -111,9 +121,10 @@ export default function ShopScreen() {
       setCart(prev => prev.map(item => {
         const veg = allVegetables.find(v => v.id === item.id);
         if (veg) {
+          const retailPrice = veg.retailPrice || veg.price || 0;
           const newPrice = isWholesale 
-            ? veg.wholesalePrice || Math.floor(veg.retailPrice * 0.75)
-            : veg.retailPrice;
+            ? veg.wholesalePrice || Math.floor(retailPrice * 0.75)
+            : retailPrice;
           return {
             ...item,
             price: newPrice,
@@ -246,12 +257,15 @@ export default function ShopScreen() {
 
   // Derived Logic
   const displayVegetables = useMemo(() => {
-    return allVegetables.map((v) => ({
-      ...v,
-      price: isWholesale
-        ? v.wholesalePrice || Math.floor(v.retailPrice * 0.75)
-        : v.retailPrice,
-    }));
+    return allVegetables.map((v) => {
+      const retailPrice = v.retailPrice || v.price || 0;
+      return {
+        ...v,
+        price: isWholesale
+          ? v.wholesalePrice || Math.floor(retailPrice * 0.75)
+          : retailPrice,
+      };
+    });
   }, [allVegetables, isWholesale]);
 
   const filteredData = useMemo(() => {
@@ -375,8 +389,6 @@ export default function ShopScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
-  const [nextBillId, setNextBillId] = useState("");
-
   const handleCheckout = async () => {
     if (cart.length === 0) return;
     try {
@@ -420,37 +432,90 @@ export default function ShopScreen() {
         grandTotal: parseFloat((cartTotal - (parseFloat(discount.toString()) || 0)).toFixed(2)),
       } as any;
 
-      Alert.alert(
-        language === 'Tamil' ? 'பில் உருவாக்கவும்' : "Generate Bill",
-        language === 'Tamil' ? 'விருப்பத்தைத் தேர்வு செய்க' : "Choose an option",
-        [
-          {
-            text: language === 'Tamil' ? 'அச்சிடு (Print)' : "Print & Save",
-            onPress: () => processBill(billData, true)
-          },
-          {
-            text: language === 'Tamil' ? 'பகிர் (Share)' : "Share & Save",
-            onPress: () => processBill(billData, false)
-          },
-          {
-            text: language === 'Tamil' ? 'ரத்து' : "Cancel",
-            style: "cancel"
-          }
-        ]
-      );
+      // Print directly using the selected preference from the Modal
+      processBill(billData, true, printerPreference);
     } catch (error) {
       console.error(error);
       Alert.alert("Error", "Could not prepare bill data");
     }
   };
 
-  const processBill = async (billData: any, printDirect: boolean) => {
+  const handleWhatsAppShare = async () => {
+    try {
+      const [mName, mNumber] = await Promise.all([
+        Storage.getItem(KEYS.MERCHANT_NAME),
+        Storage.getItem(KEYS.MERCHANT_NUMBER),
+      ]);
+
+      const billData = {
+        shopName: mName || "சுஜி காய்கறி கடை",
+        phone: mNumber || "9095938085",
+        userName: customerName || (language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Walk-in Customer'),
+        billNumber: nextBillId,
+        date: new Date().toLocaleString("en-IN"),
+        items: cart.map(item => ({
+          name: item.name,
+          tamilName: item.tamilName,
+          quantity: item.quantity,
+          price: item.price,
+          total: item.total
+        })),
+        grandTotal: (cartTotal - (parseFloat(discount.toString()) || 0)).toFixed(0)
+      };
+
+      let message = `🧾 *${billData.shopName.toUpperCase()}*\n`;
+      message += `${language === 'Tamil' ? 'போன்' : 'Ph'}: ${billData.phone}\n`;
+      message += `--------------------------\n`;
+      message += `${language === 'Tamil' ? 'பில் எண்' : 'Bill No'}: *${billData.billNumber}*\n`;
+      message += `${language === 'Tamil' ? 'தேதி' : 'Date'}: ${billData.date}\n`;
+      message += `${language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Customer'}: ${billData.userName}\n`;
+      message += `--------------------------\n`;
+
+      billData.items.forEach((item: any) => {
+        const name = item.tamilName || item.name;
+        message += `• ${name}\n`;
+        message += `  ${item.quantity}kg x ₹${item.price} = *₹${item.total.toFixed(0)}*\n`;
+      });
+
+      if (parseFloat(discount.toString()) > 0) {
+        message += `--------------------------\n`;
+        message += `${language === 'Tamil' ? 'கூட்டுத் தொகை' : 'Subtotal'}: ₹${cartTotal.toFixed(0)}\n`;
+        message += `${language === 'Tamil' ? 'தள்ளுபடி' : 'Discount'}: -₹${parseFloat(discount.toString()).toFixed(0)}\n`;
+      }
+
+      message += `--------------------------\n`;
+      message += `*${language === 'Tamil' ? 'மொத்த தொகை' : 'GRAND TOTAL'}: ₹${billData.grandTotal}*\n`;
+      message += `--------------------------\n`;
+      message += language === 'Tamil' ? `நன்றி! மீண்டும் வருக.` : `Thank you! Visit again.`;
+
+      const cleanPhone = customerMobile.trim().replace(/\D/g, '');
+      const url = cleanPhone.length >= 10 
+        ? `whatsapp://send?phone=91${cleanPhone}&text=${encodeURIComponent(message)}`
+        : `whatsapp://send?text=${encodeURIComponent(message)}`;
+      
+      const supported = await Linking.canOpenURL(url);
+      
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        const webUrl = cleanPhone.length >= 10
+            ? `https://wa.me/91${cleanPhone}?text=${encodeURIComponent(message)}`
+            : `https://wa.me/?text=${encodeURIComponent(message)}`;
+        await Linking.openURL(webUrl);
+      }
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Error", "Could not share to WhatsApp");
+    }
+  };
+
+  const processBill = async (billData: any, printDirect: boolean, printerSize: '2inch' | '3inch' = '2inch') => {
     try {
       const savedBill = await SyncManager.queueBill(billData);
       
       // Update PDF data with the real ID from DB (just in case it changed)
       const finalBillData = { ...billData, billNumber: savedBill.id };
-      await generateBillPDF(finalBillData, { printDirect });
+      await generateBillPDF(finalBillData, { printDirect, printerSize });
       
       Alert.alert(
         language === 'Tamil' ? 'வெற்றி' : "Success", 
@@ -1424,6 +1489,19 @@ export default function ShopScreen() {
                       value={customerName}
                       onChangeText={setCustomerName}
                     />
+                    <View style={{ height: 1.5, backgroundColor: borderCol, marginVertical: moderateScale(10), opacity: 0.5 }} />
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <MaterialCommunityIcons name="whatsapp" size={18} color="#25D366" style={{ marginRight: 8 }} />
+                      <TextInput
+                        style={[styles.dashboardCustomerInput, { color: textColor, paddingVertical: 5 }]}
+                        placeholder={language === 'Tamil' ? "வாடிக்கையாளர் மொபைல் எண்" : "Customer Mobile Number"}
+                        placeholderTextColor={labelColor}
+                        keyboardType="phone-pad"
+                        value={customerMobile}
+                        onChangeText={setCustomerMobile}
+                        maxLength={10}
+                      />
+                    </View>
                   </View>
                   <Ionicons name="pencil" size={16} color={labelColor} />
                 </View>
@@ -1581,25 +1659,50 @@ export default function ShopScreen() {
               { 
                 backgroundColor: cardBg, 
                 borderTopColor: borderCol,
-                paddingBottom: insets.bottom > 0 ? insets.bottom : verticalScale(15)
+                paddingBottom: insets.bottom > 0 ? insets.bottom : verticalScale(15),
+                flexDirection: 'row',
+                gap: 12,
+                paddingHorizontal: 16
               }
             ]}
           >
-             <TouchableOpacity 
-               style={[styles.mainGenerateBtn, { backgroundColor: primaryColor }]} 
-               onPress={finalizeBill}
-               activeOpacity={0.8}
-             >
-               <View style={styles.generateBtnContent}>
-                 <MaterialCommunityIcons name="printer-check" size={24} color="#FFF" />
-                 <Text style={styles.mainGenerateText}>
-                   {language === 'Tamil' ? 'பில்லை அச்சிடு & சேமி' : 'Print & Save Bill'}
-                 </Text>
-               </View>
-               <View style={styles.generateBtnArrow}>
-                 <Feather name="arrow-right" size={20} color="#FFF" />
-               </View>
-             </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.mainGenerateBtn, { backgroundColor: '#25D366', flex: 0.4 }]} 
+                onPress={handleWhatsAppShare}
+                activeOpacity={0.8}
+              >
+                  <MaterialCommunityIcons name="whatsapp" size={24} color="#FFF" />
+                  <Text style={[styles.mainGenerateText, { marginLeft: 8 }]}>Share</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.mainGenerateBtn, { backgroundColor: primaryColor, flex: 1, paddingHorizontal: 10 }]} 
+                onPress={finalizeBill}
+                activeOpacity={0.8}
+              >
+                <View style={styles.generateBtnContent}>
+                  <MaterialCommunityIcons name="printer-check" size={24} color="#FFF" />
+                  <Text style={[styles.mainGenerateText, { fontSize: moderateScale(14) }]}>
+                    {language === 'Tamil' ? `அச்சிடு (${printerPreference === '2inch' ? '2"' : '3"'})` : `Print (${printerPreference === '2inch' ? '2"' : '3"'})`}
+                  </Text>
+                </View>
+                <View style={[styles.printerSwitchInline, { backgroundColor: 'rgba(255,255,255,0.2)', marginHorizontal: 5 }]}>
+                   <TouchableOpacity 
+                     onPress={(e) => {
+                       e.stopPropagation();
+                       const newSize = printerPreference === '2inch' ? '3inch' : '2inch';
+                       setPrinterPreference(newSize);
+                       Storage.setItem(KEYS.PRINTER_SIZE, newSize);
+                     }}
+                     style={styles.switchIcon}
+                   >
+                     <MaterialCommunityIcons name="swap-horizontal" size={18} color="#FFF" />
+                   </TouchableOpacity>
+                </View>
+                <View style={styles.generateBtnArrow}>
+                  <Feather name="arrow-right" size={20} color="#FFF" />
+                </View>
+              </TouchableOpacity>
           </Animated.View>
         </SafeAreaView>
       </Modal>
@@ -2594,6 +2697,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  printerSwitchInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: scale(10),
+    paddingVertical: verticalScale(4),
+    borderRadius: scale(12),
+    marginHorizontal: scale(10),
+  },
+  switchIcon: {
+    padding: 6,
   },
   addItemQuickBtn: {
     flexDirection: 'row',

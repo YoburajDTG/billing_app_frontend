@@ -23,81 +23,113 @@ type BillData = {
   language?: 'English' | 'Tamil';
 };
 
-export const generateBillPDF = async (data: BillData, options: { printDirect?: boolean } = {}) => {
-
+export const generateBillPDF = async (data: BillData, options: { printDirect?: boolean, printerSize?: '2inch' | '3inch' } = {}) => {
+  const is3Inch = options.printerSize === '3inch';
+  
+  // 58mm (2-inch) is ~164pt, 80mm (3-inch) is ~226pt
+  const pageWidth = is3Inch ? 226 : 164;
+  
   const html = `
     <html>
       <head>
         <meta charset="utf-8">
         <style>
-          @page { margin: 0 !important; }
-          * { box-sizing: border-box; }
-          html, body {
-            margin: 0;
+          @page { 
+            margin: 0; 
+            size: ${is3Inch ? '80mm' : '58mm'} auto;
+          }
+          * { 
+            box-sizing: border-box; 
+            -webkit-print-color-adjust: exact; 
+            margin: 0; 
             padding: 0;
-            width: 100%;
-            background-color: #fff;
           }
           body { 
-            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; 
-            padding: 4px; 
-            color: #000; 
-            -webkit-print-color-adjust: exact;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif; 
+            width: ${is3Inch ? '80mm' : '58mm'};
+            padding: ${is3Inch ? '12px 16px' : '8px 10px'}; 
+            color: #000;
+            background: #fff;
           }
-          .header { text-align: center; margin-bottom: 6px; border-bottom: 1px dashed #000; padding-bottom: 6px; }
-          .shop-name { font-size: 14px; font-weight: 800; color: #000; margin-bottom: 2px; }
-          .shop-address { font-size: 9px; font-weight: 500; margin-bottom: 2px; line-height: 1.2; }
-          .shop-phone { font-size: 9px; font-weight: 700; }
+          .header { text-align: center; margin-bottom: 12px; border-bottom: 2px solid #000; padding-bottom: 10px; }
+          .shop-name { font-size: ${is3Inch ? '22px' : '18px'}; font-weight: 900; line-height: 1.2; margin-bottom: 4px; }
+          .shop-info { font-size: ${is3Inch ? '13px' : '11px'}; font-weight: 600; line-height: 1.4; }
           
-          .bill-meta { margin-bottom: 6px; font-size: 9px; line-height: 1.3; }
-          .bill-meta b { font-weight: 700; }
+          .bill-info { margin-bottom: 12px; font-size: ${is3Inch ? '13px' : '11px'}; line-height: 1.6; border-bottom: 1px dashed #666; padding-bottom: 8px; }
+          .bill-info table { width: 100%; }
+          .bill-info td { border: none; padding: 1px 0; }
           
-          table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
-          th { text-align: left; padding: 3px 0; font-size: 9px; border-bottom: 1px solid #000; }
-          td { padding: 4px 0; font-size: 9px; vertical-align: top; }
+          .items-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+          .items-table th { text-align: left; padding: 6px 0; font-size: ${is3Inch ? '13px' : '11px'}; border-bottom: 2px solid #000; font-weight: 900; }
+          .items-table td { padding: 8px 0; font-size: ${is3Inch ? '13px' : '11px'}; vertical-align: top; border-bottom: 1px solid #eee; }
+          
+          .price-sub { font-size: ${is3Inch ? '11px' : '9px'}; color: #444; font-weight: normal; }
+          
+          .summary { width: 100%; margin-top: 5px; }
+          .summary-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: ${is3Inch ? '14px' : '12px'}; font-weight: 700; }
+          .grand-total { 
+            margin-top: 8px;
+            padding-top: 10px;
+            border-top: 2px solid #000;
+            display: flex;
+            justify-content: space-between;
+            font-size: ${is3Inch ? '22px' : '18px'};
+            font-weight: 900;
+          }
+          
+          .footer { margin-top: 20px; text-align: center; border-top: 1px dashed #000; padding-top: 12px; }
+          .thanks { font-size: ${is3Inch ? '16px' : '14px'}; font-weight: 900; margin-bottom: 5px; }
+          .developer { font-size: 8px; color: #999; margin-top: 10px; }
+          
           .text-right { text-align: right; }
           .text-center { text-align: center; }
-
-          .summary-table { width: 100%; margin-top: 4px; border-top: 1px dashed #000; padding-top: 4px; }
-          .summary-row { display: flex; justify-content: space-between; padding: 1px 0; font-size: 10px; font-weight: 600; }
-          .total-row { padding-top: 3px; border-top: 1px solid #000; margin-top: 3px; font-size: 13px; font-weight: 800; }
-          
-          .footer { margin-top: 6px; text-align: center; font-size: 10px; font-weight: 700; border-top: 1px dashed #000; padding-top: 4px; }
+          .bold { font-weight: 900; }
         </style>
       </head>
       <body>
         <div class="header">
           <div class="shop-name">சுஜி காய்கறி கடை</div>
-          <div class="shop-address">பாண்டி - திண்டிவனம் மெயின் ரோடு, கிளியனூர்.</div>
-          <div class="shop-phone">Phone: ${data.phone || '9095938085'}</div>
+          <div class="shop-info">
+            பாண்டி - திண்டிவனம் மெயின் ரோடு, கிளியனூர்.<br/>
+            Cell: ${data.phone || '9095938085'}
+          </div>
         </div>
         
-        <div class="bill-meta">
-          <div><b>Date:</b> ${data.date}</div>
-          <div><b>Bill No:</b> ${data.billNumber}</div>
-          <div><b>Customer:</b> ${data.userName}</div>
+        <div class="bill-info">
+          <table>
+            <tr>
+              <td><b>Bill No:</b> ${data.billNumber}</td>
+              <td class="text-right"><b>Date:</b> ${data.date.split(',')[0]}</td>
+            </tr>
+            <tr>
+              <td colspan="2"><b>Customer:</b> ${data.userName}</td>
+            </tr>
+          </table>
         </div>
 
-        <table>
+        <table class="items-table">
           <thead>
             <tr>
-              <th style="width: 45%;">Item</th>
-              <th class="text-center">Qty</th>
-              <th class="text-right">Total</th>
+              <th style="width: 55%;">ITEM</th>
+              <th class="text-center">QTY</th>
+              <th class="text-right">TOTAL</th>
             </tr>
           </thead>
           <tbody>
             ${data.items.map(item => `
               <tr>
-                <td><b>${item.name}</b><br/><span style="font-size: 8px;">₹${item.price}/kg</span></td>
+                <td>
+                  <span class="bold">${item.name}</span><br/>
+                  <span class="price-sub">₹${item.price}/kg</span>
+                </td>
                 <td class="text-center">${item.quantity}kg</td>
-                <td class="text-right">₹${item.total.toFixed(0)}</td>
+                <td class="text-right bold">₹${item.total.toFixed(0)}</td>
               </tr>
             `).join('')}
           </tbody>
         </table>
 
-        <div class="summary-table">
+        <div class="summary">
           <div class="summary-row">
             <span>Sub-Total:</span>
             <span>₹${data.subTotal.toFixed(0)}</span>
@@ -107,27 +139,29 @@ export const generateBillPDF = async (data: BillData, options: { printDirect?: b
             <span>Discount:</span>
             <span>- ₹${data.discount.toFixed(0)}</span>
           </div>` : ''}
-          <div class="summary-row total-row">
-            <span>Grand Total:</span>
+          <div class="grand-total">
+            <span>TOTAL:</span>
             <span>₹${data.grandTotal.toFixed(0)}</span>
           </div>
         </div>
 
         <div class="footer">
-          நன்றி! மீண்டும் வருக!
+          <div class="thanks">நன்றி! மீண்டும் வருக!</div>
+          <div style="font-size: 10px; font-weight: 700;">Visit Again!</div>
+          <div class="developer">Automated Billing System</div>
         </div>
       </body>
     </html>
   `;
 
-  // Tighter height calculation for 58mm thermal roll to eliminate bottom white space
-  const estimatedHeight = 130 + (data.items.length * 24);
+  // Tighter height calculation to eliminate bottom white space
+  const estimatedHeight = (is3Inch ? 160 : 130) + (data.items.length * (is3Inch ? 28 : 24));
 
   try {
     if (options.printDirect) {
       await Print.printAsync({
         html,
-        width: 164, // Standard 58mm (164pt) width for thermal printers
+        width: pageWidth,
         height: estimatedHeight,
       });
     } else {
@@ -137,7 +171,7 @@ export const generateBillPDF = async (data: BillData, options: { printDirect?: b
 
       const { uri } = await Print.printToFileAsync({
         html,
-        width: 164, // Standard 58mm (164pt) width for thermal printers
+        width: pageWidth,
         height: estimatedHeight,
       });
 

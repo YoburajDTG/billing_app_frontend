@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
     Alert,
     FlatList,
+    Linking,
     Modal,
     Platform,
     SafeAreaView,
@@ -213,6 +214,18 @@ export default function FunctionBillScreen() {
     const [discount, setDiscount] = useState('0');
     const [nextBillId, setNextBillId] = useState('');
     const [billPreviewVisible, setBillPreviewVisible] = useState(false);
+    const [printerPreference, setPrinterPreference] = useState<'2inch' | '3inch'>('2inch');
+
+    useEffect(() => {
+        navigation.setOptions({ headerShown: false });
+        loadVegetables();
+        loadSettings();
+    }, []);
+
+    const loadSettings = async () => {
+        const pSize = await Storage.getItem(KEYS.PRINTER_SIZE);
+        if (pSize) setPrinterPreference(pSize);
+    };
 
     // inline input refs
     const qtyRefs = useRef<{ [id: string]: TextInput | null }>({});
@@ -363,18 +376,82 @@ export default function FunctionBillScreen() {
     };
 
     const handleFinalize = () => {
-        Alert.alert(
-            language === 'Tamil' ? 'பில் உருவாக்கவும்' : 'Generate Bill',
-            'Choose option',
-            [
-                { text: language === 'Tamil' ? 'அச்சிடு & சேமி' : 'Print & Save', onPress: () => processBill(true) },
-                { text: language === 'Tamil' ? 'பகிர் & சேமி' : 'Share & Save', onPress: () => processBill(false) },
-                { text: 'Cancel', style: 'cancel' },
-            ]
-        );
+        // Direct print using visible preference
+        processBill(true, printerPreference);
     };
 
-    const processBill = async (printDirect: boolean) => {
+    const handleWhatsAppShare = async () => {
+        try {
+            const [mName, mNumber] = await Promise.all([
+                Storage.getItem(KEYS.MERCHANT_NAME),
+                Storage.getItem(KEYS.MERCHANT_NUMBER),
+            ]);
+
+            const validCart = cart.filter(i => parseFloat(i.quantity) > 0 && parseFloat(i.price) > 0);
+            const subtotal = validCart.reduce((s, i) => s + i.total, 0);
+            const discountAmt = parseFloat(discount) || 0;
+            const grandTotal = subtotal - discountAmt;
+
+            const billData = {
+                shopName: mName || 'சுஜி காய்கறி கடை',
+                phone: mNumber || '9095938085',
+                userName: customerName || (language === 'Tamil' ? 'விழா வாடிக்கையாளர்' : 'Event Customer'),
+                billNumber: nextBillId || 'FUNC-BILL',
+                date: new Date().toLocaleString('en-IN'),
+                items: validCart,
+                subTotal: subtotal,
+                discount: discountAmt,
+                grandTotal: grandTotal
+            };
+
+            let message = `🧾 *${billData.shopName.toUpperCase()}*\n`;
+            message += `${language === 'Tamil' ? 'போன்' : 'Ph'}: ${billData.phone}\n`;
+            message += `--------------------------\n`;
+            message += `${language === 'Tamil' ? 'பில் எண்' : 'Bill No'}: *${billData.billNumber}*\n`;
+            message += `${language === 'Tamil' ? 'தேதி' : 'Date'}: ${billData.date}\n`;
+            message += `${language === 'Tamil' ? 'விழா' : 'Event'}: ${eventName || (language === 'Tamil' ? 'திருவிழா' : 'Festival')}\n`;
+            message += `${language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Customer'}: ${billData.userName}\n`;
+            message += `--------------------------\n`;
+
+            billData.items.forEach((item: any) => {
+                const name = item.tamilName || item.name;
+                message += `• ${name}\n`;
+                message += `  ${item.quantity}kg x ₹${item.price} = *₹${item.total.toFixed(0)}*\n`;
+            });
+
+            if (billData.discount > 0) {
+                message += `--------------------------\n`;
+                message += `${language === 'Tamil' ? 'கூட்டுத் தொகை' : 'Subtotal'}: ₹${billData.subTotal.toFixed(0)}\n`;
+                message += `${language === 'Tamil' ? 'தள்ளுபடி' : 'Discount'}: -₹${billData.discount.toFixed(0)}\n`;
+            }
+
+            message += `--------------------------\n`;
+            message += `*${language === 'Tamil' ? 'மொத்த தொகை' : 'GRAND TOTAL'}: ₹${billData.grandTotal.toFixed(0)}*\n`;
+            message += `--------------------------\n`;
+            message += language === 'Tamil' ? `நன்றி! மீண்டும் வருக.` : `Thank you! Visit again.`;
+
+            const cleanPhone = customerMobile.trim().replace(/\D/g, '');
+            const url = cleanPhone.length >= 10 
+                ? `whatsapp://send?phone=91${cleanPhone}&text=${encodeURIComponent(message)}`
+                : `whatsapp://send?text=${encodeURIComponent(message)}`;
+            
+            const supported = await Linking.canOpenURL(url);
+            
+            if (supported) {
+                await Linking.openURL(url);
+            } else {
+                const webUrl = cleanPhone.length >= 10
+                    ? `https://wa.me/91${cleanPhone}?text=${encodeURIComponent(message)}`
+                    : `https://wa.me/?text=${encodeURIComponent(message)}`;
+                await Linking.openURL(webUrl);
+            }
+        } catch (error) {
+            console.error(error);
+            Alert.alert("Error", "Could not share to WhatsApp");
+        }
+    };
+
+    const processBill = async (printDirect: boolean, printerSize: '2inch' | '3inch' = '2inch') => {
         if (mobileError) {
             Alert.alert(
                 language === 'Tamil' ? 'பிழை' : 'Invalid Contact',
@@ -411,7 +488,7 @@ export default function FunctionBillScreen() {
                 grandTotal: parseFloat(grandTotal.toFixed(2)),
             };
             const savedBill = await SyncManager.queueBill(billData);
-            await generateBillPDF({...billData, billNumber: savedBill?.id || nextBillId}, { printDirect });
+            await generateBillPDF({...billData, billNumber: savedBill?.id || nextBillId}, { printDirect, printerSize });
             Alert.alert('Success', 'Bill saved successfully!');
             setCart([]); setCustomerName(''); setCustomerMobile(''); setEventName(''); setDiscount('0'); setBillPreviewVisible(false);
         } catch (err) {
@@ -551,9 +628,39 @@ export default function FunctionBillScreen() {
                         <View style={{ height: 120 }} />
                     </ScrollView>
 
-                    <View style={[styles.stickyFooter, { backgroundColor: cardBg, borderTopColor: borderCol }]}>
-                        <TouchableOpacity style={[styles.generateBtn, { backgroundColor: primary }]} onPress={handleFinalize} activeOpacity={0.8}>
-                            <Text style={styles.generateBtnText}>Print & Save Bill</Text>
+                    <View style={[styles.stickyFooter, { backgroundColor: cardBg, borderTopColor: borderCol, flexDirection: 'row', gap: 10, paddingHorizontal: 16 }]}>
+                        <TouchableOpacity 
+                            style={[styles.generateBtn, { backgroundColor: '#25D366', flex: 0.35, justifyContent: 'center' }]} 
+                            onPress={handleWhatsAppShare} 
+                            activeOpacity={0.8}
+                        >
+                            <MaterialCommunityIcons name="whatsapp" size={24} color="#FFF" />
+                            <Text style={[styles.generateBtnText, { marginLeft: 8 }]}>Share</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity 
+                            style={[styles.generateBtn, { backgroundColor: primary, flex: 1, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 15 }]} 
+                            onPress={handleFinalize} 
+                            activeOpacity={0.8}
+                        >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <MaterialCommunityIcons name="printer-check" size={24} color="#FFF" />
+                                <Text style={[styles.generateBtnText, { fontSize: moderateScale(14) }]}>
+                                    {language === 'Tamil' ? `அச்சிடு (${printerPreference === '2inch' ? '2"' : '3"'})` : `Print (${printerPreference === '2inch' ? '2"' : '3"'})`}
+                                </Text>
+                            </View>
+
+                            <TouchableOpacity 
+                                onPress={(e) => {
+                                    e.stopPropagation();
+                                    const nextSize = printerPreference === '2inch' ? '3inch' : '2inch';
+                                    setPrinterPreference(nextSize);
+                                    Storage.setItem(KEYS.PRINTER_SIZE, nextSize);
+                                }}
+                                style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: 5, borderRadius: 8 }}
+                            >
+                                <MaterialCommunityIcons name="swap-horizontal" size={18} color="#FFF" />
+                            </TouchableOpacity>
                         </TouchableOpacity>
                     </View>
                 </SafeAreaView>

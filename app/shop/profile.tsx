@@ -30,6 +30,7 @@ export default function MerchantProfileScreen() {
     const [merchantLogo, setMerchantLogo] = useState('');
     const [merchantNumber, setMerchantNumber] = useState('');
     const [mobileError, setMobileError] = useState(false);
+    const [printerSize, setPrinterSize] = useState<'2inch' | '3inch'>('2inch');
 
     useEffect(() => {
         loadProfile();
@@ -38,15 +39,17 @@ export default function MerchantProfileScreen() {
     const loadProfile = async () => {
         setLoading(true);
         try {
-            const [mName, mLogo, mNumber] = await Promise.all([
+            const [mName, mLogo, mNumber, pSize] = await Promise.all([
                 Storage.getItem(KEYS.MERCHANT_NAME),
                 Storage.getItem(KEYS.MERCHANT_LOGO),
-                Storage.getItem(KEYS.MERCHANT_NUMBER)
+                Storage.getItem(KEYS.MERCHANT_NUMBER),
+                Storage.getItem(KEYS.PRINTER_SIZE)
             ]);
 
             if (mName) setMerchantName(mName);
             if (mLogo) setMerchantLogo(mLogo);
             if (mNumber) setMerchantNumber(mNumber);
+            if (pSize) setPrinterSize(pSize);
         } catch (error) {
             console.error('Error loading profile:', error);
         } finally {
@@ -108,7 +111,8 @@ export default function MerchantProfileScreen() {
             await Promise.all([
                 Storage.setItem(KEYS.MERCHANT_NAME, merchantName),
                 Storage.setItem(KEYS.MERCHANT_LOGO, merchantLogo),
-                Storage.setItem(KEYS.MERCHANT_NUMBER, merchantNumber)
+                Storage.setItem(KEYS.MERCHANT_NUMBER, merchantNumber),
+                Storage.setItem(KEYS.PRINTER_SIZE, printerSize)
             ]);
 
             Alert.alert(language === 'Tamil' ? 'வெற்றி' : "Success", language === 'Tamil' ? 'விவரங்கள் சேமிக்கப்பட்டன!' : "Profile updated successfully!");
@@ -205,11 +209,27 @@ export default function MerchantProfileScreen() {
                                 </View>
                             )}
                         </TouchableOpacity>
-                        {merchantLogo ? (
-                            <TouchableOpacity style={styles.changeLogoBtn} onPress={pickImage}>
-                                <Text style={{ color: primaryColor, fontWeight: '700', fontSize: moderateScale(13) }}>{language === 'Tamil' ? 'லோகோவை மாற்றவும்' : 'Change Logo'}</Text>
+                    </View>
+
+                    <View style={styles.inputWrapper}>
+                        <Text style={[styles.inputLabel, { color: subTextColor }]}>{language === 'Tamil' ? 'பிரிண்டர் அளவு' : 'Default Printer Size'}</Text>
+                        <View style={styles.sizeSelector}>
+                            <TouchableOpacity 
+                                style={[styles.sizeOption, printerSize === '2inch' && { backgroundColor: primaryColor, borderColor: primaryColor }]}
+                                onPress={() => setPrinterSize('2inch')}
+                            >
+                                <Text style={[styles.sizeOptionText, printerSize === '2inch' && { color: '#FFF' }]}>2-inch (58mm)</Text>
                             </TouchableOpacity>
-                        ) : null}
+                            <TouchableOpacity 
+                                style={[styles.sizeOption, printerSize === '3inch' && { backgroundColor: primaryColor, borderColor: primaryColor }]}
+                                onPress={() => setPrinterSize('3inch')}
+                            >
+                                <Text style={[styles.sizeOptionText, printerSize === '3inch' && { color: '#FFF' }]}>3-inch (80mm)</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <Text style={[styles.sizeHint, { color: subTextColor }]}>
+                            {language === 'Tamil' ? 'தேர்வு செய்தவுடன் ஒவ்வொரு முறையும் கேட்காது.' : 'Choosing this will skip the size prompt during billing.'}
+                        </Text>
                     </View>
                 </View>
                 
@@ -387,5 +407,30 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         marginTop: verticalScale(4),
         marginLeft: scale(4),
+    },
+    sizeSelector: {
+        flexDirection: 'row',
+        gap: 12,
+        marginTop: 8,
+    },
+    sizeOption: {
+        flex: 1,
+        height: 44,
+        borderRadius: 10,
+        borderWidth: 1.5,
+        borderColor: '#E2E8F0',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'transparent',
+    },
+    sizeOptionText: {
+        fontSize: moderateScale(13),
+        fontWeight: '700',
+        color: '#64748B',
+    },
+    sizeHint: {
+        fontSize: moderateScale(10),
+        marginTop: 6,
+        fontStyle: 'italic',
     },
 });

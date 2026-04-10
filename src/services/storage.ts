@@ -44,4 +44,5 @@ export const KEYS = {
     MERCHANT_NAME: 'merchant_name',
     MERCHANT_LOGO: 'merchant_logo',
     MERCHANT_NUMBER: 'merchant_number',
+    PRINTER_SIZE: 'printer_size',
 };

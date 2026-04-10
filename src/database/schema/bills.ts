@@ -4,6 +4,7 @@ export interface Bill {
     discount: number;
     tax?: number;
     customer_name?: string;
+    customer_mobile?: string;
     customer_id?: string;
     payment_method?: string;
     payment_status?: string;
