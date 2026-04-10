@@ -94,5 +94,9 @@ export const billDbService = {
     getPdf: async (billId: string) => {
         const bill = await billRepository.getBillWithItems(billId);
         return { data: bill };
+    },
+    getNextId: async () => {
+        const nextId = await billRepository.getNextBillId();
+        return { data: nextId };
     }
 };

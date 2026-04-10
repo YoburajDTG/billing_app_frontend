@@ -5,7 +5,6 @@ import React, { useEffect, useState } from 'react';
 import {
     Alert,
     Image,
-    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -30,6 +29,8 @@ export default function MerchantProfileScreen() {
     const [merchantName, setMerchantName] = useState('');
     const [merchantLogo, setMerchantLogo] = useState('');
     const [merchantNumber, setMerchantNumber] = useState('');
+    const [mobileError, setMobileError] = useState(false);
+    const [printerSize, setPrinterSize] = useState<'2inch' | '3inch'>('2inch');
 
     useEffect(() => {
         loadProfile();
@@ -38,19 +39,33 @@ export default function MerchantProfileScreen() {
     const loadProfile = async () => {
         setLoading(true);
         try {
-            const [mName, mLogo, mNumber] = await Promise.all([
+            const [mName, mLogo, mNumber, pSize] = await Promise.all([
                 Storage.getItem(KEYS.MERCHANT_NAME),
                 Storage.getItem(KEYS.MERCHANT_LOGO),
-                Storage.getItem(KEYS.MERCHANT_NUMBER)
+                Storage.getItem(KEYS.MERCHANT_NUMBER),
+                Storage.getItem(KEYS.PRINTER_SIZE)
             ]);
 
             if (mName) setMerchantName(mName);
             if (mLogo) setMerchantLogo(mLogo);
             if (mNumber) setMerchantNumber(mNumber);
+            if (pSize) setPrinterSize(pSize);
         } catch (error) {
             console.error('Error loading profile:', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const isValidMobile = (num: string) => /^[6-9]\d{9}$/.test(num.trim());
+
+    const handleMobileChange = (value: string) => {
+        const digits = value.replace(/\D/g, '').slice(0, 10);
+        setMerchantNumber(digits);
+        if (digits.length > 0) {
+            setMobileError(!isValidMobile(digits));
+        } else {
+            setMobileError(false);
         }
     };
 
@@ -74,21 +89,35 @@ export default function MerchantProfileScreen() {
     };
 
     const saveProfile = async () => {
-        if (!merchantName.trim()) {
-            Alert.alert(language === 'Tamil' ? 'சரிபார்ப்பு' : "Validation", language === 'Tamil' ? 'கடை பெயர் தேவை' : "Shop name is required");
+        if (merchantName.trim().length < 3) {
+            Alert.alert(
+                language === 'Tamil' ? 'சரிபார்ப்பு' : "Validation", 
+                language === 'Tamil' ? 'கடை பெயர் குறைந்தது 3 எழுத்துக்கள் இருக்க வேண்டும்' : "Shop name must be at least 3 characters"
+            );
             return;
         }
+
+        if (merchantNumber.trim() && !isValidMobile(merchantNumber)) {
+            Alert.alert(
+                language === 'Tamil' ? 'பிழை' : "Invalid Mobile", 
+                language === 'Tamil' ? 'சரியான 10 இலக்க எண்ணை உள்ளிடவும்' : "Please enter a valid 10-digit mobile number"
+            );
+            setMobileError(true);
+            return;
+        }
+
         setLoading(true);
         try {
             await Promise.all([
                 Storage.setItem(KEYS.MERCHANT_NAME, merchantName),
                 Storage.setItem(KEYS.MERCHANT_LOGO, merchantLogo),
-                Storage.setItem(KEYS.MERCHANT_NUMBER, merchantNumber)
+                Storage.setItem(KEYS.MERCHANT_NUMBER, merchantNumber),
+                Storage.setItem(KEYS.PRINTER_SIZE, printerSize)
             ]);
 
             Alert.alert(language === 'Tamil' ? 'வெற்றி' : "Success", language === 'Tamil' ? 'விவரங்கள் சேமிக்கப்பட்டன!' : "Profile updated successfully!");
             router.back();
-        } catch (error) {
+        } catch {
             Alert.alert(language === 'Tamil' ? 'பிழை' : "Error", language === 'Tamil' ? 'சுயவிவர மாற்றங்களைச் சேமிப்பதில் தோல்வி.' : "Failed to save profile changes.");
         } finally {
             setLoading(false);
@@ -140,13 +169,26 @@ export default function MerchantProfileScreen() {
                     <View style={styles.inputWrapper}>
                         <Text style={[styles.inputLabel, { color: subTextColor }]}>{language === 'Tamil' ? 'தொடர்பு எண்' : 'Contact Number'}</Text>
                         <TextInput
-                            style={[styles.input, { color: textColor, borderColor: isDark ? '#333' : '#E2E8F0', backgroundColor: isDark ? '#2C2C2C' : '#F8FAFC' }]}
+                            style={[
+                                styles.input, 
+                                { 
+                                    color: textColor, 
+                                    borderColor: mobileError ? '#EF4444' : (isDark ? '#333' : '#E2E8F0'), 
+                                    backgroundColor: isDark ? '#2C2C2C' : '#F8FAFC' 
+                                }
+                            ]}
                             value={merchantNumber}
-                            onChangeText={setMerchantNumber}
+                            onChangeText={handleMobileChange}
                             placeholder={language === 'Tamil' ? '90959 38085' : "e.g. 90959 38085"}
                             placeholderTextColor="#94A3B8"
                             keyboardType="phone-pad"
+                            maxLength={10}
                         />
+                        {mobileError && (
+                            <Text style={styles.errorText}>
+                                {language === 'Tamil' ? 'சரியான 10 இலக்க எண்ணை உள்ளிடவும்' : 'Enter valid 10-digit number'}
+                            </Text>
+                        )}
                     </View>
 
                     <View style={styles.inputWrapper}>
@@ -167,11 +209,27 @@ export default function MerchantProfileScreen() {
                                 </View>
                             )}
                         </TouchableOpacity>
-                        {merchantLogo ? (
-                            <TouchableOpacity style={styles.changeLogoBtn} onPress={pickImage}>
-                                <Text style={{ color: primaryColor, fontWeight: '700', fontSize: moderateScale(13) }}>{language === 'Tamil' ? 'லோகோவை மாற்றவும்' : 'Change Logo'}</Text>
+                    </View>
+
+                    <View style={styles.inputWrapper}>
+                        <Text style={[styles.inputLabel, { color: subTextColor }]}>{language === 'Tamil' ? 'பிரிண்டர் அளவு' : 'Default Printer Size'}</Text>
+                        <View style={styles.sizeSelector}>
+                            <TouchableOpacity 
+                                style={[styles.sizeOption, printerSize === '2inch' && { backgroundColor: primaryColor, borderColor: primaryColor }]}
+                                onPress={() => setPrinterSize('2inch')}
+                            >
+                                <Text style={[styles.sizeOptionText, printerSize === '2inch' && { color: '#FFF' }]}>2-inch (58mm)</Text>
                             </TouchableOpacity>
-                        ) : null}
+                            <TouchableOpacity 
+                                style={[styles.sizeOption, printerSize === '3inch' && { backgroundColor: primaryColor, borderColor: primaryColor }]}
+                                onPress={() => setPrinterSize('3inch')}
+                            >
+                                <Text style={[styles.sizeOptionText, printerSize === '3inch' && { color: '#FFF' }]}>3-inch (80mm)</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <Text style={[styles.sizeHint, { color: subTextColor }]}>
+                            {language === 'Tamil' ? 'தேர்வு செய்தவுடன் ஒவ்வொரு முறையும் கேட்காது.' : 'Choosing this will skip the size prompt during billing.'}
+                        </Text>
                     </View>
                 </View>
                 
@@ -342,5 +400,37 @@ const styles = StyleSheet.create({
     menuDivider: {
         height: 1,
         width: '100%',
+    },
+    errorText: {
+        color: '#EF4444',
+        fontSize: moderateScale(11),
+        fontWeight: '700',
+        marginTop: verticalScale(4),
+        marginLeft: scale(4),
+    },
+    sizeSelector: {
+        flexDirection: 'row',
+        gap: 12,
+        marginTop: 8,
+    },
+    sizeOption: {
+        flex: 1,
+        height: 44,
+        borderRadius: 10,
+        borderWidth: 1.5,
+        borderColor: '#E2E8F0',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'transparent',
+    },
+    sizeOptionText: {
+        fontSize: moderateScale(13),
+        fontWeight: '700',
+        color: '#64748B',
+    },
+    sizeHint: {
+        fontSize: moderateScale(10),
+        marginTop: 6,
+        fontStyle: 'italic',
     },
 });

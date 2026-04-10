@@ -26,8 +26,9 @@ export const SyncManager = {
             };
 
             // Save directly to local database
-            await billDbService.create(billPayload);
+            const result = await billDbService.create(billPayload);
             console.log('✓ Bill saved successfully to local database');
+            return result.data;
         } catch (error) {
             console.error('✗ Error saving bill:', error);
             // Keep bill in queue for retry

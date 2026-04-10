@@ -1,5 +1,5 @@
-import SplashScreen from '@/components/SplashScreen';
+import { Redirect } from 'expo-router';
 
 export default function Index() {
-    return <SplashScreen />;
+    return <Redirect href="/shop/dashboard" />;
 }

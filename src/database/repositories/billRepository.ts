@@ -6,19 +6,36 @@ export const billRepository = {
     async createBill(bill: Omit<Bill, 'id' | 'created_at'>, items: Omit<BillItem, 'id' | 'bill_id'>[]): Promise<Bill> {
         try {
             const newBill = await sqliteService.transaction(async (txn) => {
-                // 1. Insert the bill
-                const billId = generateId();
-                const createdAt = new Date().toISOString();
+                // 1. Generate sequence-based Bill ID (Format: BILL001Y26)
+                const now = new Date();
+                const yearSuffix = now.getFullYear().toString().slice(-2);
+                
+                const lastBill = await txn.getFirstAsync<{ id: string }>(
+                    `SELECT id FROM bills WHERE id LIKE 'BILL%Y${yearSuffix}' ORDER BY id DESC LIMIT 1`
+                );
+
+                let nextSeq = 1;
+                if (lastBill) {
+                    const match = lastBill.id.match(/BILL(\d+)Y/);
+                    if (match) {
+                        nextSeq = parseInt(match[1], 10) + 1;
+                    }
+                }
+
+                const paddedSeq = nextSeq.toString().padStart(3, '0');
+                const billId = `BILL${paddedSeq}Y${yearSuffix}`;
+                const createdAt = now.toISOString();
 
                 await txn.runAsync(
-                    `INSERT INTO bills (id, total_amount, discount, tax, customer_name, payment_method, notes, mode, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    `INSERT INTO bills (id, total_amount, discount, tax, customer_name, customer_mobile, payment_method, notes, mode, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                         billId,
                         bill.total_amount,
                         bill.discount || 0,
                         bill.tax || 0,
                         bill.customer_name || null,
+                        bill.customer_mobile || null,
                         'cash',
                         null,
                         bill.mode || 'Retail',
@@ -53,6 +70,7 @@ export const billRepository = {
                     total_amount: bill.total_amount,
                     discount: bill.discount || 0,
                     customer_name: bill.customer_name,
+                    customer_mobile: bill.customer_mobile,
                     created_at: createdAt
                 } as Bill;
             });
@@ -67,7 +85,7 @@ export const billRepository = {
     async getHistory(limit = 50): Promise<(Bill & { itemCount: number })[]> {
         try {
             const bills = await sqliteService.query<Bill & { itemCount: number }>(
-                `SELECT b.id, b.total_amount, b.discount, b.customer_name, b.created_at,
+                `SELECT b.id, b.total_amount, b.discount, b.customer_name, b.customer_mobile, b.created_at,
                  (SELECT COUNT(*) FROM bill_items WHERE bill_id = b.id) as itemCount
                  FROM bills b
                  ORDER BY b.created_at DESC 
@@ -84,7 +102,7 @@ export const billRepository = {
     async getBillWithItems(billId: string): Promise<{ bill: Bill; items: BillItem[] } | null> {
         try {
             const bill = await sqliteService.queryOne<Bill>(
-                `SELECT id, total_amount, discount, customer_name, created_at 
+                `SELECT id, total_amount, discount, customer_name, customer_mobile, created_at 
                  FROM bills 
                  WHERE id = ?`,
                 [billId]
@@ -114,7 +132,7 @@ export const billRepository = {
     async getBillById(billId: string): Promise<Bill | null> {
         try {
             return await sqliteService.queryOne<Bill>(
-                `SELECT id, total_amount, discount, customer_name, created_at 
+                `SELECT id, total_amount, discount, customer_name, customer_mobile, created_at 
                  FROM bills 
                  WHERE id = ?`,
                 [billId]
@@ -137,10 +155,34 @@ export const billRepository = {
         }
     },
 
+    async getNextBillId(): Promise<string> {
+        try {
+            const now = new Date();
+            const yearSuffix = now.getFullYear().toString().slice(-2);
+            const lastBill = await sqliteService.queryOne<{ id: string }>(
+                `SELECT id FROM bills WHERE id LIKE 'BILL%Y${yearSuffix}' ORDER BY id DESC LIMIT 1`
+            );
+
+            let nextSeq = 1;
+            if (lastBill) {
+                const match = lastBill.id.match(/BILL(\d+)Y/);
+                if (match) {
+                    nextSeq = parseInt(match[1], 10) + 1;
+                }
+            }
+
+            const paddedSeq = nextSeq.toString().padStart(3, '0');
+            return `BILL${paddedSeq}Y${yearSuffix}`;
+        } catch (error) {
+            console.error('Error getting next bill ID:', error);
+            return `BILL-ERROR`;
+        }
+    },
+
     async getBillsForDateRange(startDate: string, endDate: string): Promise<(Bill & { itemCount: number })[]> {
         try {
             const bills = await sqliteService.query<Bill & { itemCount: number }>(
-                `SELECT b.id, b.total_amount, b.discount, b.customer_name, b.created_at,
+                `SELECT b.id, b.total_amount, b.discount, b.customer_name, b.customer_mobile, b.created_at,
                  (SELECT COUNT(*) FROM bill_items WHERE bill_id = b.id) as itemCount
                  FROM bills b
                  WHERE DATE(b.created_at) BETWEEN DATE(?) AND DATE(?)

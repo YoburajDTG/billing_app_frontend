@@ -1,10 +1,8 @@
-import React, { useEffect } from 'react';
-import { View, Image, StyleSheet, Animated, Dimensions } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, Image, StyleSheet, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
-import { scale, verticalScale } from '@/utils/responsive';
+import { scale } from '@/utils/responsive';
 import { useAppTheme } from '@/context/ThemeContext';
-
-const { width, height } = Dimensions.get('window');
 
 /**
  * SplashScreen Component
@@ -15,9 +13,9 @@ const SplashScreen = () => {
     const router = useRouter();
     const { isDark } = useAppTheme();
     
-    // Animation constants
-    const fadeAnim = new Animated.Value(0);
-    const scaleAnim = new Animated.Value(0.9);
+    // Animation constants using useRef for stability
+    const fadeAnim = useRef(new Animated.Value(0)).current;
+    const scaleAnim = useRef(new Animated.Value(0.9)).current;
 
     useEffect(() => {
         // Professional animation sequence
@@ -41,7 +39,7 @@ const SplashScreen = () => {
         }, 2500);
 
         return () => clearTimeout(timer);
-    }, []);
+    }, [fadeAnim, router, scaleAnim]);
 
     // Clean background matches the app's dark/light theme
     const backgroundColor = isDark ? '#121212' : '#FFFFFF';

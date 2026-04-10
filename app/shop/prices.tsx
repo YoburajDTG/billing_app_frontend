@@ -4,7 +4,7 @@ import { KEYS, Storage } from "@/services/storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import Animated, { FadeInDown, FadeInUp, Layout } from "react-native-reanimated";
+import Animated, { FadeInUp, Layout } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { verticalScale, scale, moderateScale } from "@/utils/responsive";
@@ -31,26 +31,47 @@ export default function SetPricesScreen() {
   }, []);
 
   const loadVegetables = async () => {
-    // Fetch fresh data from local database
+    // Fetch all vegetables with their latest pricing from local database
     try {
       const res = await inventoryDbService.getAll();
       if (res.data && res.data.length > 0) {
-        const data = res.data.map((v: any) => ({
-          ...v,
-          id: v.vegetable_id || v.id,
-          price: v.price || 0,
-          wholesalePrice: v.wholesale_price || 0,
-          retailPrice: v.retail_price || 0,
-          tamilName: v.tamil_name || v.tamilName,
-          name: v.name,
-        }));
-        setVegetables(data);
-        Storage.setItem(KEYS.VEGETABLES, data);
+        const data = res.data.map((v: any) => {
+           const retailPrice = v.retail_price || v.base_price || v.last_logged_price || 0;
+           const wholesalePrice = v.wholesale_price || Math.floor(retailPrice * 0.75);
+           
+           return {
+              ...v,
+              id: v.id,
+              price: retailPrice,
+              wholesalePrice: wholesalePrice,
+              retailPrice: retailPrice,
+              tamilName: v.tamil_name || v.tamilName,
+              name: v.name,
+           };
+        });
+
+        // Priority Sorting based on user request
+        const priorityTamilNames = ["பச்சை மிளகாய்", "தக்காளி", "வெங்காயம்", "உருளை", "கேரட்", "பீன்ஸ்"];
+        
+        const sortedData = [...data].sort((a, b) => {
+          const aIndex = priorityTamilNames.indexOf(a.tamilName);
+          const bIndex = priorityTamilNames.indexOf(b.tamilName);
+          
+          if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
+          if (aIndex !== -1) return -1;
+          if (bIndex !== -1) return 1;
+          
+          return (a.name || "").localeCompare(b.name || "");
+        });
+
+        setVegetables(sortedData);
+        Storage.setItem(KEYS.VEGETABLES, sortedData);
       } else {
         const cached = (await Storage.getItem(KEYS.VEGETABLES)) || [];
         setVegetables(cached);
       }
     } catch (e) {
+      console.error("Load price error:", e);
       const cached = (await Storage.getItem(KEYS.VEGETABLES)) || [];
       setVegetables(cached);
     }
@@ -61,15 +82,19 @@ export default function SetPricesScreen() {
     type: "wholesale" | "retail",
     value: string,
   ) => {
+    const sanitized = value.replace(/[^0-9.]/g, '');
+    const parts = sanitized.split('.');
+    const finalVal = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : sanitized;
+    const numVal = parseFloat(finalVal) || 0;
+
     setVegetables((prev) =>
       prev.map((v) =>
         v.id === id
           ? {
               ...v,
-              [type === "wholesale" ? "wholesalePrice" : "retailPrice"]:
-                parseFloat(value) || 0,
+              [type === "wholesale" ? "wholesalePrice" : "retailPrice"]: numVal,
               // Keep the base price synced with retail for backwards compatibility
-              price: type === "retail" ? parseFloat(value) || 0 : v.price,
+              price: type === "retail" ? numVal : v.price,
             }
           : v,
       ),
@@ -77,6 +102,16 @@ export default function SetPricesScreen() {
   };
 
   const handleSave = async () => {
+    // Validation
+    const hasNegative = vegetables.some(v => (v.wholesalePrice || 0) < 0 || (v.retailPrice || 0) < 0);
+    if (hasNegative) {
+      Alert.alert(
+        language === 'Tamil' ? 'பிழை' : 'Invalid Price',
+        language === 'Tamil' ? 'விலை எதிர்மறையாக இருக்கக்கூடாது' : 'Prices cannot be negative'
+      );
+      return;
+    }
+
     try {
       // Save each vegetable's price to database
       for (const v of vegetables) {

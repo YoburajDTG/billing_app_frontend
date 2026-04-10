@@ -6,11 +6,14 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { KEYS, Storage } from "@/services/storage";
+import { generateBillPDF } from "@/utils/pdfGenerator";
 import {
     ActivityIndicator,
     Alert,
     FlatList,
+    Linking,
     Modal,
     Platform,
     ScrollView,
@@ -28,17 +31,45 @@ export default function BillingHistoryScreen() {
   const [loading, setLoading] = useState(true);
   const [selectedBill, setSelectedBill] = useState<any>(null);
   const [previewVisible, setPreviewVisible] = useState(false);
-  const [startDate, setStartDate] = useState(new Date(new Date().setDate(new Date().getDate() - 7)).toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
-  const { t, isDark, language } = useAppTheme();
+  const [selectedFilter, setSelectedFilter] = useState('Today');
+  const [printerPreference, setPrinterPreference] = useState<'2inch' | '3inch'>('2inch');
+  const { isDark, language } = useAppTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
-    fetchHistory();
-  }, [startDate, endDate]);
+    loadSettings();
+  }, []);
 
-  const fetchHistory = async () => {
+  const loadSettings = async () => {
+    const pSize = await Storage.getItem(KEYS.PRINTER_SIZE);
+    if (pSize) setPrinterPreference(pSize);
+  };
+
+  const fetchHistory = useCallback(async () => {
+    // Basic validation for date format (YYYY-MM-DD)
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(startDate) || !dateRegex.test(endDate)) {
+      if (selectedFilter === 'Custom' && (startDate.length < 10 || endDate.length < 10)) {
+        // Still typing
+        return;
+      }
+      return;
+    }
+
+    if (new Date(startDate) > new Date(endDate)) {
+        // Only alert if both are full length to avoid annoying user while typing
+        if (startDate.length === 10 && endDate.length === 10) {
+            Alert.alert(
+                language === 'Tamil' ? 'பிழை' : 'Invalid Range',
+                language === 'Tamil' ? 'தொடக்க தேதி முடிவு தேதிக்கு முன் இருக்க வேண்டும்' : 'Start date must be before end date'
+            );
+        }
+        return;
+    }
+
     setLoading(true);
     try {
       const response = await billDbService.getHistoryByDateRange(startDate, endDate);
@@ -51,12 +82,38 @@ export default function BillingHistoryScreen() {
         itemCount: bill.itemCount || 0,
       }));
       setHistory(bills);
-    } catch (error) {
-      console.error("Fetch history error:", error);
-      Alert.alert("Error", "Failed to fetch billing history.");
+    } catch {
+      // silent
     } finally {
       setLoading(false);
     }
+  }, [startDate, endDate, language, selectedFilter]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
+  const applyFilter = (filter: string) => {
+    Haptics.selectionAsync();
+    setSelectedFilter(filter);
+    const today = new Date();
+    let start = new Date();
+    const end = new Date();
+
+    if (filter === 'Today') {
+      start = today;
+    } else if (filter === 'Last Week') {
+      start.setDate(today.getDate() - 7);
+    } else if (filter === 'Last Month') {
+      start.setMonth(today.getMonth() - 1);
+    } else if (filter === 'Last Year') {
+      start.setFullYear(today.getFullYear() - 1);
+    } else {
+      return; // Custom range, don't auto-update
+    }
+
+    setStartDate(start.toISOString().split('T')[0]);
+    setEndDate(end.toISOString().split('T')[0]);
   };
 
   const handleDownloadPdf = async (billId: string) => {
@@ -68,22 +125,117 @@ export default function BillingHistoryScreen() {
         return;
       }
 
-      // Fetch bill details from local database
       const response = await billDbService.getPdf(billIdToUse);
-      const billData = response.data;
-
-      if (!billData || !billData.bill) {
+      if (!response?.data?.bill) {
         Alert.alert("Error", "Bill not found.");
         return;
       }
 
-      Alert.alert(
-        "Success",
-        "Bill details retrieved successfully. PDF generation handled on the UI side.",
-      );
+      const [mName, mNumber] = await Promise.all([
+        Storage.getItem(KEYS.MERCHANT_NAME),
+        Storage.getItem(KEYS.MERCHANT_NUMBER),
+      ]);
+
+      const bill = response.data.bill;
+      const items = response.data.items;
+
+      const billData = {
+        shopName: mName || 'SUJI VEGETABLES',
+        phone: mNumber || '9095938085',
+        userName: bill.customer_name || 'Customer',
+        billNumber: bill.id,
+        date: new Date(bill.created_at).toLocaleString('en-IN'),
+        mode: 'History',
+        language,
+        items: items.map((i: any) => ({
+          id: i.id,
+          name: i.name,
+          tamilName: i.tamil_name || i.name,
+          quantity: i.quantity,
+          price: i.unit_price,
+          total: i.total_price
+        })),
+        subTotal: (bill.total_amount + (bill.discount || 0)),
+        discount: bill.discount || 0,
+        grandTotal: bill.total_amount
+      };
+
+      await generateBillPDF(billData, { printDirect: true, printerSize: printerPreference });
     } catch (error) {
-      console.error("PDF retrieval error", error);
-      Alert.alert("Error", "Failed to retrieve bill details.");
+      console.error("PDF generation error", error);
+      Alert.alert("Error", "Failed to generate PDF.");
+    }
+  };
+
+  const handleWhatsAppShare = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      if (!selectedBill?.id) return;
+
+      const response = await billDbService.getPdf(selectedBill.id);
+      if (!response?.data?.bill) {
+        Alert.alert("Error", "Bill not found.");
+        return;
+      }
+
+      const [mName, mNumber] = await Promise.all([
+        Storage.getItem(KEYS.MERCHANT_NAME),
+        Storage.getItem(KEYS.MERCHANT_NUMBER),
+      ]);
+
+      const bill = response.data.bill;
+      const items = response.data.items;
+
+      let message = `🧾 *${(mName || "SUJI VEGETABLES").toUpperCase()}*\n`;
+      message += `${language === 'Tamil' ? 'போன்' : 'Ph'}: ${mNumber || "9095938085"}\n`;
+      message += `--------------------------\n`;
+      message += `${language === 'Tamil' ? 'பில் எண்' : 'Bill No'}: *${bill.id}*\n`;
+      message += `${language === 'Tamil' ? 'தேதி' : 'Date'}: ${new Date(bill.created_at).toLocaleString('en-IN')}\n`;
+      message += `${language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Customer'}: ${bill.customer_name || (language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Guest')}\n`;
+      message += `--------------------------\n`;
+
+      items.forEach((item: any) => {
+        const name = item.tamil_name || item.name;
+        message += `• ${name}\n`;
+        message += `  ${item.quantity}kg x ₹${item.unit_price} = *₹${item.total_price.toFixed(0)}*\n`;
+      });
+
+      if (bill.discount > 0) {
+        message += `--------------------------\n`;
+        message += `${language === 'Tamil' ? 'கூட்டுத் தொகை' : 'Subtotal'}: ₹${(bill.total_amount + bill.discount).toFixed(0)}\n`;
+        message += `${language === 'Tamil' ? 'தள்ளுபடி' : 'Discount'}: -₹${bill.discount.toFixed(0)}\n`;
+      }
+
+      message += `--------------------------\n`;
+      message += `*${language === 'Tamil' ? 'மொத்த தொகை' : 'GRAND TOTAL'}: ₹${bill.total_amount.toFixed(0)}*\n`;
+      message += `--------------------------\n`;
+      message += language === 'Tamil' ? `நன்றி! மீண்டும் வருக.` : `Thank you! Visit again.`;
+
+      let whatsappUrl = `whatsapp://send?text=${encodeURIComponent(message)}`;
+      
+      if (bill.customer_mobile && bill.customer_mobile.length >= 10) {
+        // Simple sanitization: remove non-numeric
+        const cleanPhone = bill.customer_mobile.replace(/\D/g, '');
+        const phone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+        whatsappUrl = `whatsapp://send?phone=${phone}&text=${encodeURIComponent(message)}`;
+      }
+
+      const supported = await Linking.canOpenURL(whatsappUrl);
+      
+      if (supported) {
+        await Linking.openURL(whatsappUrl);
+      } else {
+        const phone = bill.customer_mobile && bill.customer_mobile.length >= 10 
+          ? (bill.customer_mobile.replace(/\D/g, '').length === 10 ? `91${bill.customer_mobile.replace(/\D/g, '')}` : bill.customer_mobile.replace(/\D/g, ''))
+          : '';
+        const fallbackUrl = phone 
+          ? `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
+          : `https://wa.me/?text=${encodeURIComponent(message)}`;
+        await Linking.openURL(fallbackUrl);
+      }
+    } catch (error) {
+      console.error("WhatsApp share error", error);
+      Alert.alert("Error", "Failed to share on WhatsApp.");
     }
   };
 
@@ -206,29 +358,67 @@ export default function BillingHistoryScreen() {
           </View>
         </View>
 
-        {/* Date Filter Controls */}
-        <View style={styles.filterRow}>
-           <View style={styles.dateInputContainer}>
-              <Text style={styles.dateLabel}>{language === 'Tamil' ? 'தொடக்கம்' : 'From'}</Text>
-              <TextInput
-                style={[styles.dateInput, { backgroundColor: isDark ? '#2C2C2E' : 'rgba(255,255,255,0.2)', color: '#FFF' }]}
-                value={startDate}
-                onChangeText={setStartDate}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor="rgba(255,255,255,0.5)"
-              />
-           </View>
-           <View style={styles.dateInputContainer}>
-              <Text style={styles.dateLabel}>{language === 'Tamil' ? 'முடிவு' : 'To'}</Text>
-              <TextInput
-                style={[styles.dateInput, { backgroundColor: isDark ? '#2C2C2E' : 'rgba(255,255,255,0.2)', color: '#FFF' }]}
-                value={endDate}
-                onChangeText={setEndDate}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor="rgba(255,255,255,0.5)"
-              />
-           </View>
-        </View>
+        {/* Quick Filter Chips */}
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false} 
+          style={styles.filterScroll}
+          contentContainerStyle={styles.filterScrollContent}
+        >
+          {['Today', 'Last Week', 'Last Month', 'Last Year', 'Custom'].map((filter) => (
+            <TouchableOpacity
+              key={filter}
+              onPress={() => applyFilter(filter)}
+              style={[
+                styles.filterChip,
+                { 
+                  backgroundColor: selectedFilter === filter ? '#FFF' : 'rgba(255,255,255,0.15)',
+                  borderColor: selectedFilter === filter ? '#FFF' : 'transparent'
+                }
+              ]}
+            >
+              <Text 
+                style={[
+                  styles.filterChipText, 
+                  { color: selectedFilter === filter ? '#FF8C00' : '#FFF' }
+                ]}
+              >
+                {language === 'Tamil' ? (
+                  filter === 'Today' ? 'இன்று' :
+                  filter === 'Last Week' ? 'கடந்த வாரம்' :
+                  filter === 'Last Month' ? 'கடந்த மாதம்' :
+                  filter === 'Last Year' ? 'கடந்த ஆண்டு' : 'சொந்த தேதி'
+                ) : filter}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {/* Date Filter Controls - Only show inputs if Custom is selected or for clarity */}
+        {selectedFilter === 'Custom' && (
+          <Animated.View entering={FadeInDown} style={styles.filterRow}>
+            <View style={styles.dateInputContainer}>
+                <Text style={styles.dateLabel}>{language === 'Tamil' ? 'தொடக்கம்' : 'From'}</Text>
+                <TextInput
+                  style={[styles.dateInput, { backgroundColor: isDark ? '#2C2C2E' : 'rgba(255,255,255,0.2)', color: '#FFF' }]}
+                  value={startDate}
+                  onChangeText={setStartDate}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor="rgba(255,255,255,0.5)"
+                />
+            </View>
+            <View style={styles.dateInputContainer}>
+                <Text style={styles.dateLabel}>{language === 'Tamil' ? 'முடிவு' : 'To'}</Text>
+                <TextInput
+                  style={[styles.dateInput, { backgroundColor: isDark ? '#2C2C2E' : 'rgba(255,255,255,0.2)', color: '#FFF' }]}
+                  value={endDate}
+                  onChangeText={setEndDate}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor="rgba(255,255,255,0.5)"
+                />
+            </View>
+          </Animated.View>
+        )}
       </LinearGradient>
 
       {loading ? (
@@ -292,8 +482,16 @@ export default function BillingHistoryScreen() {
                   </Text>
                 </View>
                 <Text style={[styles.modalTitle, { color: textColor }]}>
-                  {selectedBill?.customerName}
+                  {selectedBill?.customerName || (language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Guest')}
                 </Text>
+                {selectedBill?.customer_mobile && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                    <FontAwesome name="whatsapp" size={14} color="#25D366" style={{ marginRight: 4 }} />
+                    <Text style={{ color: labelColor, fontSize: 14, marginLeft: 4 }}>
+                      {selectedBill.customer_mobile}
+                    </Text>
+                  </View>
+                )}
                 <Text style={[styles.modalSubtitle, { color: labelColor }]}>
                   {selectedBill && new Date(selectedBill.date).toLocaleString()}
                 </Text>
@@ -391,7 +589,7 @@ export default function BillingHistoryScreen() {
                     {language === 'Tamil' ? 'கூட்டுத் தொகை' : 'Subtotal'}
                   </Text>
                   <Text style={[styles.totalValue, { color: textColor }]}>
-                    ₹{(selectedBill?.total_amount || 0).toFixed(2)}
+                    ₹{((selectedBill?.total_amount || 0) + (selectedBill?.discount || 0)).toFixed(2)}
                   </Text>
                 </View>
                 {selectedBill?.discount > 0 && (
@@ -416,15 +614,49 @@ export default function BillingHistoryScreen() {
                   <Text
                     style={[styles.grandTotalValue, { color: primaryColor }]}
                   >
-                    ₹{((selectedBill?.total_amount || 0) - (selectedBill?.discount || 0)).toFixed(0)}
+                    ₹{(selectedBill?.total_amount || 0).toFixed(0)}
                   </Text>
                 </View>
               </View>
+
+              <View style={[styles.inlinePrefRow, { borderColor: borderCol }]}>
+                  <Text style={[styles.prefLabel, { color: labelColor }]}>
+                     {language === 'Tamil' ? 'பிரிண்டர் அளவு' : 'Printer Size'}
+                  </Text>
+                  <View style={styles.inlineToggleBox}>
+                      <TouchableOpacity 
+                        onPress={() => {
+                          setPrinterPreference('2inch');
+                          Storage.setItem(KEYS.PRINTER_SIZE, '2inch');
+                        }}
+                        style={[styles.miniToggle, printerPreference === '2inch' && { backgroundColor: primaryColor }]}
+                      >
+                         <Text style={[styles.miniToggleText, printerPreference === '2inch' && { color: '#FFF' }]}>2"</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity 
+                        onPress={() => {
+                          setPrinterPreference('3inch');
+                          Storage.setItem(KEYS.PRINTER_SIZE, '3inch');
+                        }}
+                        style={[styles.miniToggle, printerPreference === '3inch' && { backgroundColor: primaryColor }]}
+                      >
+                         <Text style={[styles.miniToggleText, printerPreference === '3inch' && { color: '#FFF' }]}>3"</Text>
+                      </TouchableOpacity>
+                  </View>
+              </View>
             </ScrollView>
 
-            <View style={styles.modalFooter}>
+            <View style={[styles.modalFooter, { flexDirection: 'row', gap: 10 }]}>
               <TouchableOpacity
-                style={[styles.downloadBtn, { backgroundColor: primaryColor }]}
+                style={[styles.downloadBtn, { backgroundColor: '#25D366', flex: 0.4 }]}
+                onPress={handleWhatsAppShare}
+              >
+                <MaterialCommunityIcons name="whatsapp" size={20} color="#FFF" />
+                <Text style={styles.downloadBtnText}>Share</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.downloadBtn, { backgroundColor: primaryColor, flex: 1 }]}
                 onPress={() => handleDownloadPdf("")}
               >
                 <MaterialCommunityIcons
@@ -432,7 +664,7 @@ export default function BillingHistoryScreen() {
                   size={20}
                   color="#FFF"
                 />
-                <Text style={styles.downloadBtnText}>Download PDF</Text>
+                <Text style={styles.downloadBtnText}>PDF</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -456,9 +688,26 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: scale(32),
     borderBottomRightRadius: scale(32),
   },
+  filterScroll: {
+    marginTop: verticalScale(15),
+  },
+  filterScrollContent: {
+    gap: scale(10),
+    paddingRight: scale(20),
+  },
+  filterChip: {
+    paddingHorizontal: scale(16),
+    paddingVertical: verticalScale(8),
+    borderRadius: scale(20),
+    borderWidth: 1,
+  },
+  filterChipText: {
+    fontSize: moderateScale(12),
+    fontWeight: '800',
+  },
   filterRow: {
     flexDirection: 'row',
-    marginTop: verticalScale(20),
+    marginTop: verticalScale(15),
     gap: scale(12),
   },
   dateInputContainer: {
@@ -774,5 +1023,34 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(16),
     fontWeight: "800",
     letterSpacing: -0.2,
+  },
+  inlinePrefRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: scale(16),
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderStyle: 'dashed',
+  },
+  prefLabel: {
+    fontSize: moderateScale(13),
+    fontWeight: '700',
+  },
+  inlineToggleBox: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  miniToggle: {
+    paddingHorizontal: scale(12),
+    paddingVertical: verticalScale(6),
+    borderRadius: scale(8),
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  miniToggleText: {
+    fontSize: moderateScale(11),
+    fontWeight: '800',
+    color: '#6B7280',
   },
 });

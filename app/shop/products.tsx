@@ -6,7 +6,7 @@ import { moderateScale, scale, verticalScale } from "@/utils/responsive";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -38,17 +38,12 @@ export default function ProductsScreen() {
   const { isDark, language } = useAppTheme();
   const insets = useSafeAreaInsets();
 
-  useEffect(() => {
-    fetchProducts();
-  }, []);
-
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
     setIsLoading(true);
     try {
       const data = await vegetableRepository.getAll();
       setProducts(data);
-    } catch (e) {
-      console.error(e);
+    } catch {
       Alert.alert(
         language === "Tamil" ? "பிழை" : "Error",
         language === "Tamil"
@@ -58,15 +53,39 @@ export default function ProductsScreen() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [language]);
+
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
 
   const handleSave = async () => {
-    if (!name.trim()) {
+    if (name.trim().length < 2) {
       Alert.alert(
         language === "Tamil" ? "சரிபார்ப்பு பிழை" : "Validation Error",
         language === "Tamil"
-          ? "பொருள் பெயர் அவசியம்"
-          : "Product Name is required",
+          ? "பொருள் பெயர் குறைந்தது 2 எழுத்துக்கள் இருக்க வேண்டும்"
+          : "Product Name must be at least 2 characters",
+      );
+      return;
+    }
+
+    if (tamilName.trim().length < 2) {
+      Alert.alert(
+        language === "Tamil" ? "சரிபார்ப்பு பிழை" : "Validation Error",
+        language === "Tamil"
+          ? "தமிழ் பெயர் குறைந்தது 2 எழுத்துக்கள் இருக்க வேண்டும்"
+          : "Tamil Name must be at least 2 characters",
+      );
+      return;
+    }
+
+    if (category.trim().length < 3) {
+      Alert.alert(
+        language === "Tamil" ? "சரிபார்ப்பு பிழை" : "Validation Error",
+        language === "Tamil"
+          ? "வகை குறைந்தது 3 எழுத்துக்கள் இருக்க வேண்டும்"
+          : "Category must be at least 3 characters",
       );
       return;
     }
@@ -90,8 +109,7 @@ export default function ProductsScreen() {
       setModalVisible(false);
       resetForm();
       fetchProducts();
-    } catch (e) {
-      console.error(e);
+    } catch {
       Alert.alert(
         language === "Tamil" ? "பிழை" : "Error",
         language === "Tamil"
@@ -116,7 +134,7 @@ export default function ProductsScreen() {
             try {
               await vegetableRepository.delete(id);
               fetchProducts();
-            } catch (e) {
+            } catch {
               Alert.alert(
                 language === "Tamil" ? "பிழை" : "Error",
                 language === "Tamil"

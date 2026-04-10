@@ -124,6 +124,7 @@ class SQLiteService {
           discount REAL DEFAULT 0,
           tax REAL DEFAULT 0,
           customer_name TEXT,
+          customer_mobile TEXT,
           customer_id TEXT,
           payment_method TEXT DEFAULT 'cash',
           payment_status TEXT DEFAULT 'PAID',
@@ -168,6 +169,7 @@ class SQLiteService {
       await this.ensureColumnExists('bills', 'tax', 'REAL DEFAULT 0');
       await this.ensureColumnExists('bills', 'payment_status', "TEXT DEFAULT 'PAID'");
       await this.ensureColumnExists('bills', 'notes', 'TEXT');
+      await this.ensureColumnExists('bills', 'customer_mobile', 'TEXT');
       await this.ensureColumnExists('bills', 'mode', "TEXT DEFAULT 'Retail'");
       await this.ensureColumnExists('bills', 'updated_at', 'TEXT DEFAULT CURRENT_TIMESTAMP');
 

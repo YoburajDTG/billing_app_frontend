@@ -1,4 +1,4 @@
-import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { AuthProvider } from "@/context/AuthContext";
 import { AppThemeProvider, useAppTheme } from "@/context/ThemeContext";
 import { initializeDatabase } from "@/database/client";
 import { seedDatabase } from "@/database/seed";
@@ -13,7 +13,7 @@ import { useEffect } from "react";
 import "react-native-reanimated";
 
 function RootLayoutNav() {
-  const { t, theme, language } = useAppTheme();
+  const { t, theme } = useAppTheme();
 
   return (
     <Stack

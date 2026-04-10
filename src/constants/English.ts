@@ -44,4 +44,5 @@ export const ENGLISH = {
     // Success
     BILL_CREATED: "Bill created successfully",
     USER_CREATED: "User created successfully",
+    ADD_ITEM: "Add Item",
 };
