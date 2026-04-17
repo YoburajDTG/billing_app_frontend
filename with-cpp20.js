@@ -1,7 +1,7 @@
-const { withProjectBuildGradle, withAppBuildGradle } = require("@expo/config-plugins");
+const { withProjectBuildGradle, withAppBuildGradle, withSettingsGradle } = require("@expo/config-plugins");
 
 /**
- * Expo Config Plugin to fix C++20 flags and SDK version mismatches
+ * Expo Config Plugin to fix C++20 flags, SDK versions, and Tamil name encoding issues
  */
 const withAndroidFixes = (config) => {
   // 1. Fix C++ Flags in app/build.gradle
@@ -26,20 +26,15 @@ const withAndroidFixes = (config) => {
   config = withProjectBuildGradle(config, (config) => {
     if (config.modResults.language === "groovy") {
       let contents = config.modResults.contents;
-      
       const forceSdkBlock = `
-/**
- * FORCE SDK FIXES FOR OLD LIBRARIES
- */
+/** FORCE SDK FIXES **/
 subprojects {
     afterEvaluate { project ->
         if (project.hasProperty('android')) {
             project.android {
                 compileSdkVersion 34
                 buildToolsVersion "34.0.0"
-                defaultConfig {
-                    targetSdkVersion 34
-                }
+                defaultConfig { targetSdkVersion 34 }
                 compileOptions {
                     sourceCompatibility JavaVersion.VERSION_17
                     targetCompatibility JavaVersion.VERSION_17
@@ -49,10 +44,20 @@ subprojects {
     }
 }
 `;
-      // Ensure we don't duplicate the block
       if (!contents.includes("FORCE SDK FIXES")) {
           contents += forceSdkBlock;
       }
+      config.modResults.contents = contents;
+    }
+    return config;
+  });
+
+  // 3. Fix Tamil Name Encoding issues in settings.gradle
+  config = withSettingsGradle(config, (config) => {
+    if (config.modResults.language === "groovy") {
+      let contents = config.modResults.contents;
+      // Replace any rootProject.name line with a safe English version for the build system
+      contents = contents.replace(/rootProject\.name\s*=\s*['"].*['"]/, "rootProject.name = 'suji-veg-billing'");
       config.modResults.contents = contents;
     }
     return config;
