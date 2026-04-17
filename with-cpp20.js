@@ -22,36 +22,35 @@ const withAndroidFixes = (config) => {
     return config;
   });
 
-  // 2. Force SDK versions in project/build.gradle for old libraries (like the printer)
+  // 2. Force SDK versions for all subprojects using afterEvaluate
   config = withProjectBuildGradle(config, (config) => {
     if (config.modResults.language === "groovy") {
       let contents = config.modResults.contents;
       
       const forceSdkBlock = `
-allprojects {
-    each { project ->
+subprojects {
+    afterEvaluate { project ->
         if (project.hasProperty('android')) {
             project.android {
-                if (compileSdkVersion < 34) {
-                    compileSdkVersion 34
-                }
-                if (buildToolsVersion < "34.0.0") {
-                    buildToolsVersion "34.0.0"
-                }
+                compileSdkVersion 34
+                buildToolsVersion "34.0.0"
                 defaultConfig {
-                    if (targetSdkVersion < 34) {
-                        targetSdkVersion 34
-                    }
+                    targetSdkVersion 34
+                }
+                // Force Java 17 for all modules to support modern compilation
+                compileOptions {
+                    sourceCompatibility JavaVersion.VERSION_17
+                    targetCompatibility JavaVersion.VERSION_17
                 }
             }
         }
     }
 }
 `;
-      if (!contents.includes("allprojects {")) {
-          contents += forceSdkBlock;
-      } else if (!contents.includes("compileSdkVersion 34")) {
-          // Add inside existing allprojects or at the end
+      // Clean up previous attempts if they exist
+      contents = contents.replace(/allprojects\s*\{\s*each\s*\{\s*project\s*->[\s\S]*?\}\s*\}/g, "");
+      
+      if (!contents.includes("subprojects {")) {
           contents += forceSdkBlock;
       }
       config.modResults.contents = contents;
