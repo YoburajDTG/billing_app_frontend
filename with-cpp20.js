@@ -22,16 +22,16 @@ const withAndroidFixes = (config) => {
     return config;
   });
 
-  // 2. Force SDK versions for all subprojects safely
+  // 2. Force SDK versions for all subprojects safely (Avoid afterEvaluate crash)
   config = withProjectBuildGradle(config, (config) => {
     if (config.modResults.language === "groovy") {
       let contents = config.modResults.contents;
       const forceSdkBlock = `
 /** FORCE SDK FIXES **/
 subprojects {
-    afterEvaluate { project ->
-        if (project.hasProperty('android')) {
-            project.android {
+    def applyAndroidFix = { p ->
+        if (p.hasProperty('android')) {
+            p.android {
                 compileSdkVersion 34
                 buildToolsVersion "34.0.0"
                 defaultConfig { targetSdkVersion 34 }
@@ -41,6 +41,11 @@ subprojects {
                 }
             }
         }
+    }
+    if (it.state.executed) {
+        applyAndroidFix(it)
+    } else {
+        it.afterEvaluate { applyAndroidFix(it) }
     }
 }
 `;
@@ -56,7 +61,6 @@ subprojects {
   config = withSettingsGradle(config, (config) => {
     if (config.modResults.language === "groovy") {
       let contents = config.modResults.contents;
-      // Replace any rootProject.name line with a safe English version for the build system
       contents = contents.replace(/rootProject\.name\s*=\s*['"].*['"]/, "rootProject.name = 'suji-veg-billing'");
       config.modResults.contents = contents;
     }
