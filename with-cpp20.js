@@ -22,12 +22,15 @@ const withAndroidFixes = (config) => {
     return config;
   });
 
-  // 2. Force SDK versions for all subprojects using afterEvaluate
+  // 2. Force SDK versions for all subprojects safely
   config = withProjectBuildGradle(config, (config) => {
     if (config.modResults.language === "groovy") {
       let contents = config.modResults.contents;
       
       const forceSdkBlock = `
+/**
+ * FORCE SDK FIXES FOR OLD LIBRARIES
+ */
 subprojects {
     afterEvaluate { project ->
         if (project.hasProperty('android')) {
@@ -37,7 +40,6 @@ subprojects {
                 defaultConfig {
                     targetSdkVersion 34
                 }
-                // Force Java 17 for all modules to support modern compilation
                 compileOptions {
                     sourceCompatibility JavaVersion.VERSION_17
                     targetCompatibility JavaVersion.VERSION_17
@@ -47,10 +49,8 @@ subprojects {
     }
 }
 `;
-      // Clean up previous attempts if they exist
-      contents = contents.replace(/allprojects\s*\{\s*each\s*\{\s*project\s*->[\s\S]*?\}\s*\}/g, "");
-      
-      if (!contents.includes("subprojects {")) {
+      // Ensure we don't duplicate the block
+      if (!contents.includes("FORCE SDK FIXES")) {
           contents += forceSdkBlock;
       }
       config.modResults.contents = contents;
