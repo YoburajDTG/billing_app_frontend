@@ -337,7 +337,7 @@ export default function BillingHistoryScreen() {
         colors={isDark ? ['#1A1A1A', '#1A1A1A'] : ['#FF8C00', '#FF8C00']}
         style={[
           styles.header,
-          { paddingTop: insets.top + (Platform.OS === 'android' ? 15 : 10) }
+          { paddingTop: insets.top + (Platform.OS === 'android' ? verticalScale(15) : verticalScale(10)) }
         ]}
       >
         <View style={styles.headerTopRow}>
@@ -352,8 +352,8 @@ export default function BillingHistoryScreen() {
               {language === 'Tamil' ? 'விற்பனை வரலாறு' : 'Billing History'}
             </Text>
             <View style={styles.statusRow}>
-               <View style={[styles.liveIndicator, { backgroundColor: '#10B981' }]} />
-               <Text style={[styles.liveText, { color: '#FFF', opacity: 0.9 }]}>ADMIN DASHBOARD</Text>
+               <View style={[styles.liveIndicator, { backgroundColor: isDark ? primaryColor : '#FFF' }]} />
+               <Text style={[styles.liveText, { color: '#FFF', opacity: 0.9 }]}>{language === 'Tamil' ? 'நிர்வாக டாஷ்போர்டு' : 'ADMIN DASHBOARD'}</Text>
             </View>
           </View>
         </View>
@@ -380,7 +380,7 @@ export default function BillingHistoryScreen() {
               <Text 
                 style={[
                   styles.filterChipText, 
-                  { color: selectedFilter === filter ? '#FF8C00' : '#FFF' }
+                  { color: selectedFilter === filter ? primaryColor : '#FFF' }
                 ]}
               >
                 {language === 'Tamil' ? (
@@ -684,9 +684,14 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: scale(20),
-    paddingBottom: verticalScale(24),
-    borderBottomLeftRadius: scale(32),
-    borderBottomRightRadius: scale(32),
+    paddingBottom: verticalScale(25),
+    borderBottomLeftRadius: scale(30),
+    borderBottomRightRadius: scale(30),
+    elevation: 8,
+    shadowColor: '#FF8C00',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
   },
   filterScroll: {
     marginTop: verticalScale(15),
@@ -752,13 +757,13 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#10B981',
+    backgroundColor: '#FF8C00',
     marginRight: 6,
   },
   liveText: {
     fontSize: moderateScale(10),
     fontWeight: '800',
-    color: '#10B981',
+    color: '#FF8C00',
     letterSpacing: 0.5,
   },
   centered: {
@@ -1013,7 +1018,7 @@ const styles = StyleSheet.create({
     borderRadius: scale(20),
     gap: scale(10),
     elevation: 4,
-    shadowColor: '#00A86B',
+    shadowColor: '#FF8C00',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 10,

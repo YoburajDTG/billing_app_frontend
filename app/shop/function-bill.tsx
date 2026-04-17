@@ -1,8 +1,9 @@
+import { useAuth } from '@/context/AuthContext';
 import { useAppTheme } from '@/context/ThemeContext';
 import { billDbService, inventoryDbService } from '@/services/dbService';
 import { KEYS, Storage } from '@/services/storage';
 import { generateBillPDF } from '@/utils/pdfGenerator';
-import { moderateScale, scale } from '@/utils/responsive';
+import { moderateScale, scale, verticalScale } from '@/utils/responsive';
 import { SyncManager } from '@/utils/syncManager';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -25,6 +26,12 @@ import {
     View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ThermalPrinter } from '@/utils/thermalPrinter';
+import { NativeModules } from 'react-native';
+import * as Contacts from 'expo-contacts';
+import ViewShot, { captureRef } from 'react-native-view-shot';
+import * as Sharing from 'expo-sharing';
+const { BluetoothManager } = NativeModules;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Vegetable = {
@@ -201,6 +208,7 @@ export default function FunctionBillScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
     const { isDark, language } = useAppTheme();
+    const { user } = useAuth();
 
     // ── State ──
     const [vegetables, setVegetables] = useState<Vegetable[]>([]);
@@ -214,7 +222,11 @@ export default function FunctionBillScreen() {
     const [discount, setDiscount] = useState('0');
     const [nextBillId, setNextBillId] = useState('');
     const [billPreviewVisible, setBillPreviewVisible] = useState(false);
-    const [printerPreference, setPrinterPreference] = useState<'2inch' | '3inch'>('2inch');
+    const [printerPreference, setPrinterPreference] = useState<'2inch' | '3inch'>('3inch');
+    const [isPrinterConnected, setIsPrinterConnected] = useState(false);
+    const [showPrinterModal, setShowPrinterModal] = useState(false);
+    const [pairedDevices, setPairedDevices] = useState<any[]>([]);
+    const [isScanning, setIsScanning] = useState(false);
 
     useEffect(() => {
         navigation.setOptions({ headerShown: false });
@@ -225,6 +237,180 @@ export default function FunctionBillScreen() {
     const loadSettings = async () => {
         const pSize = await Storage.getItem(KEYS.PRINTER_SIZE);
         if (pSize) setPrinterPreference(pSize);
+        
+        const lastPrinter = await Storage.getItem('last_printer');
+        if (lastPrinter) {
+            handleConnectPrinter(lastPrinter.address);
+        }
+    };
+
+    const handleConnectPrinter = async (address: string) => {
+        try {
+            const success = await ThermalPrinter.connect(address);
+            if (success) {
+                setIsPrinterConnected(true);
+                setShowPrinterModal(false);
+                // Save as last printer
+                const devices = await ThermalPrinter.getPairedDevices();
+                const device = devices.find((d: any) => d.address === address);
+                if (device) await Storage.setItem('last_printer', device);
+            } else {
+                Alert.alert('Error', 'Failed to connect to printer');
+            }
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const scanPrinters = async () => {
+        setIsScanning(true);
+        const devices = await ThermalPrinter.discoverDevices();
+        setPairedDevices(devices);
+        setIsScanning(false);
+    };
+
+    const handlePickContact = async () => {
+        try {
+            const { status } = await Contacts.requestPermissionsAsync();
+            if (status === 'granted') {
+                const contactResult = await Contacts.presentContactPickerAsync();
+                if (contactResult) {
+                    // Fetch full data by ID
+                    const contact = await Contacts.getContactByIdAsync(contactResult.id);
+                    if (contact) {
+                        // Robust Name extraction
+                        let displayName = contact.name;
+                        if (!displayName || displayName === 'undefined') {
+                            displayName = [contact.firstName, contact.middleName, contact.lastName].filter(Boolean).join(' ');
+                        }
+                        if (displayName && displayName !== 'undefined') setCustomerName(displayName);
+
+                        if (contact.phoneNumbers && contact.phoneNumbers.length > 0) {
+                            const mobileObj = contact.phoneNumbers.find(p => p.label === 'mobile' || p.label === 'Mobile') || contact.phoneNumbers[0];
+                            const rawNumber = mobileObj.number || '';
+                            const digits = rawNumber.replace(/\D/g, '').slice(-10);
+                            if (digits) {
+                                handleMobileChange(digits);
+                            }
+                        }
+                    }
+                }
+            } else {
+                Alert.alert('Permission Denied', 'Please allow contact access to pick a customer.');
+            }
+        } catch (error: any) {
+            console.error('Contact picker error:', error);
+            Alert.alert('Error', 'Could not open contacts: ' + (error?.message || 'Unknown error'));
+        }
+    };
+
+    const thermalShotRef = useRef<any>(null);
+    const viewShotRef = useRef<any>(null);
+
+    const ThermalReceiptView = ({ name, mobile, billId, date, cart, total, shopName, shopPhone, grandTotal }: any) => (
+        <ViewShot 
+          ref={thermalShotRef} 
+          options={{ format: 'png', quality: 1.0 }} 
+          style={styles.thermalCaptureContainer}
+        >
+          <View style={styles.thermalContent}>
+            <Text style={styles.thermalShopName}>சுஜி காய்கறி கடை</Text>
+            <Text style={styles.thermalShopLoc}>பாண்டி - திண்டிவனம் மெயின் ரோடு, கிளியனூர்.</Text>
+            <Text style={styles.thermalShopContact}>Phone: {shopPhone || "9095938085"}</Text>
+            
+            <Text style={styles.thermalDivider}>------------------------------------------</Text>
+            
+            <View style={styles.thermalRow}>
+              <Text style={styles.thermalText}>Date: {date}</Text>
+            </View>
+            <View style={styles.thermalRow}>
+              <Text style={styles.thermalText}>Bill No: {billId}</Text>
+            </View>
+            <View style={styles.thermalRow}>
+              <Text style={styles.thermalText}>Customer: {name || (language === 'Tamil' ? 'ராஜா' : 'Cash Sale')}</Text>
+            </View>
+    
+            <View style={[styles.thermalRow, { marginTop: 10, borderBottomWidth: 2, borderBottomColor: '#000', paddingBottom: 5 }]}>
+              <Text style={[styles.thermalHeader, { flex: 2 }]}>Item</Text>
+              <Text style={[styles.thermalHeader, { flex: 1, textAlign: 'center' }]}>Qty</Text>
+              <Text style={[styles.thermalHeader, { flex: 1, textAlign: 'right' }]}>Total</Text>
+            </View>
+    
+            {cart.map((item: any, idx: number) => (
+              <View key={idx} style={styles.thermalItemRow}>
+                <View style={{ flex: 2 }}>
+                  <Text style={styles.thermalItemName}>{item.tamilName || item.name}</Text>
+                  <Text style={styles.thermalItemSub}>₹{item.price}/kg</Text>
+                </View>
+                <Text style={[styles.thermalItemData, { flex: 1, textAlign: 'center' }]}>{item.quantity}kg</Text>
+                <Text style={[styles.thermalItemData, { flex: 1, textAlign: 'right' }]}>₹{item.total.toFixed(0)}</Text>
+              </View>
+            ))}
+    
+            <Text style={styles.thermalDivider}>------------------------------------------</Text>
+            
+            <View style={styles.thermalSummaryRow}>
+              <Text style={styles.thermalSummaryLabel}>Sub-Total:</Text>
+              <Text style={styles.thermalSummaryValue}>₹{total.toFixed(0)}</Text>
+            </View>
+            <View style={[styles.thermalSummaryRow, { borderBottomWidth: 3, borderBottomColor: '#000', paddingBottom: 5 }]}>
+              <Text style={[styles.thermalSummaryLabel, { fontSize: 24, paddingVertical: 5 }]}>Grand Total:</Text>
+              <Text style={[styles.thermalSummaryValue, { fontSize: 24, paddingVertical: 5 }]}>₹{grandTotal.toFixed(0)}</Text>
+            </View>
+            
+            <Text style={[styles.thermalShopLoc, { marginTop: 20, fontStyle: 'italic' }]}>நன்றி! மீண்டும் வருக.</Text>
+          </View>
+        </ViewShot>
+    );
+
+    const handleShareImage = async () => {
+        try {
+            if (!thermalShotRef.current) {
+                Alert.alert('Error', 'Receipt view not ready');
+                return;
+            }
+
+            // Capture using the ViewShot component's internal capture method
+            const uri = await thermalShotRef.current.capture();
+            console.log('Capture success (Function Bill):', uri);
+
+            const cleanPhone = (customerMobile || "").trim().replace(/\D/g, '');
+            if (!cleanPhone) {
+                 await Sharing.shareAsync(uri);
+                 return;
+            }
+
+            try {
+                const hasNativeShare = !!NativeModules.RNShare;
+                if (hasNativeShare && cleanPhone.length >= 10) {
+                    const Share = require('react-native-share').default;
+                    const FileSystem = require('expo-file-system');
+                    const targetPhone = `91${cleanPhone.slice(-10)}`;
+                    
+                    const base64Data = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+                    const shareUrl = `data:image/jpeg;base64,${base64Data}`;
+
+                    const shareOptions = {
+                        social: Share.Social.WHATSAPP,
+                        whatsAppNumber: targetPhone,
+                        url: shareUrl,
+                        type: 'image/jpeg',
+                        appId: "com.whatsapp",
+                        forceFullApp: true,
+                        failOnCancel: false,
+                    };
+                    await Share.shareSingle(shareOptions);
+                } else {
+                    await Sharing.shareAsync(uri);
+                }
+            } catch (err) {
+                console.warn('Direct share failed in function bill, using system:', err);
+                await Sharing.shareAsync(uri);
+            }
+        } catch (error) {
+            console.error('Share image error:', error);
+            Alert.alert('Error', 'Failed to share invoice as image');
+        }
     };
 
     // inline input refs
@@ -240,7 +426,7 @@ export default function FunctionBillScreen() {
     };
 
     // ── Colors ──
-    const primary = '#8B5CF6';
+    const primary = '#FF8C00';
     const bg = isDark ? '#0F0F0F' : '#F5F3FF';
     const cardBg = isDark ? '#1C1C1E' : '#FFFFFF';
     const textCol = isDark ? '#F2F2F7' : '#1A1C1E';
@@ -488,7 +674,26 @@ export default function FunctionBillScreen() {
                 grandTotal: parseFloat(grandTotal.toFixed(2)),
             };
             const savedBill = await SyncManager.queueBill(billData);
-            await generateBillPDF({...billData, billNumber: savedBill?.id || nextBillId}, { printDirect, printerSize });
+            
+            if (isPrinterConnected) {
+                await ThermalPrinter.printReceipt({
+                    shopName: billData.shopName,
+                    billId: savedBill?.id || nextBillId,
+                    date: billData.date,
+                    items: billData.items.map(i => ({
+                        name: i.name,
+                        tamilName: i.tamilName,
+                        quantity: i.quantity,
+                        unitPrice: i.price,
+                        totalPrice: i.total
+                    })),
+                    totalAmount: billData.grandTotal,
+                    customerName: billData.userName
+                });
+            } else {
+                await generateBillPDF({...billData, billNumber: savedBill?.id || nextBillId}, { printDirect, printerSize });
+            }
+            
             Alert.alert('Success', 'Bill saved successfully!');
             setCart([]); setCustomerName(''); setCustomerMobile(''); setEventName(''); setDiscount('0'); setBillPreviewVisible(false);
         } catch (err) {
@@ -499,10 +704,10 @@ export default function FunctionBillScreen() {
 
     return (
         <View style={[styles.root, { backgroundColor: bg }]}>
-            <StatusBar style="light" backgroundColor="#7C3AED" />
+            <StatusBar style="light" backgroundColor="#FF8C00" />
             
-            <LinearGradient colors={isDark ? ['#1A1A1A', '#1A1A1A'] : ['#7C3AED', '#8B5CF6']} style={[styles.header, { paddingTop: insets.top + (Platform.OS === 'android' ? 14 : 8) }]}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}><Ionicons name="arrow-back" size={22} color="#FFF" /></TouchableOpacity>
+            <LinearGradient colors={isDark ? ['#1A1A1A', '#1A1A1A'] : ['#FF8C00', '#FF8C00']} style={[styles.header, { paddingTop: insets.top + (Platform.OS === 'android' ? verticalScale(14) : verticalScale(8)) }]}>
+                <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}><Ionicons name="arrow-back" size={22} color="#FF8C00" /></TouchableOpacity>
                 <View style={{ flex: 1, marginLeft: scale(10) }}>
                     <Text style={styles.headerTitle}>{language === 'Tamil' ? 'விழா பில்' : 'Function Bill'}</Text>
                     <Text style={styles.headerSub}>{language === 'Tamil' ? 'திருமணம் & நிகழ்வு பில்லிங்' : 'Marriage & Event Billing'}</Text>
@@ -518,15 +723,31 @@ export default function FunctionBillScreen() {
                     <TextInput style={[styles.infoTextField, { color: textCol }]} placeholder="Event name (optional)" placeholderTextColor={subCol} value={eventName} onChangeText={setEventName} />
                 </View>
                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
-                    <View style={[styles.infoInput, { flex: 1, backgroundColor: isDark ? '#252525' : '#F9F9FF', borderColor: borderCol }]}>
+                    <View style={[styles.infoInput, { flex: 1, backgroundColor: isDark ? '#252525' : '#F9F9FF', borderColor: borderCol, paddingRight: 4 }]}>
                         <Ionicons name="person" size={14} color={primary} />
-                        <TextInput style={[styles.infoTextField, { color: textCol }]} placeholder="Customer name" placeholderTextColor={subCol} value={customerName} onChangeText={setCustomerName} />
+                        <TextInput style={[styles.infoTextField, { color: textCol, flex: 1 }]} placeholder="Customer name" placeholderTextColor={subCol} value={customerName} onChangeText={setCustomerName} />
+                        <TouchableOpacity onPress={handlePickContact} style={{ padding: 4 }}>
+                            <Ionicons name="people" size={16} color={primary} />
+                        </TouchableOpacity>
                     </View>
                     <View style={[styles.infoInput, { flex: 1, borderColor: mobileError ? '#EF4444' : borderCol, backgroundColor: isDark ? '#252525' : '#F9F9FF' }]}>
                         <Ionicons name="call" size={14} color={mobileError ? '#EF4444' : primary} />
                         <TextInput style={[styles.infoTextField, { color: textCol }]} placeholder="Mobile no." placeholderTextColor={subCol} value={customerMobile} onChangeText={handleMobileChange} keyboardType="phone-pad" maxLength={10} />
                     </View>
                 </View>
+
+                <TouchableOpacity 
+                    onPress={() => {
+                        scanPrinters();
+                        setShowPrinterModal(true);
+                    }}
+                    style={[styles.printerStatus, { backgroundColor: isPrinterConnected ? '#FF8C0020' : '#EF444420', borderColor: isPrinterConnected ? '#FF8C00' : '#EF4444' }]}
+                >
+                    <MaterialCommunityIcons name={isPrinterConnected ? 'printer-check' : 'printer-off'} size={14} color={isPrinterConnected ? '#FF8C00' : '#EF4444'} />
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: isPrinterConnected ? '#FF8C00' : '#EF4444', marginLeft: 4 }}>
+                        {isPrinterConnected ? 'PRINTER CONNECTED' : 'CONNECT PRINTER'}
+                    </Text>
+                </TouchableOpacity>
             </View>
 
             <View style={[styles.searchBar, { backgroundColor: cardBg, borderBottomColor: borderCol }]}>
@@ -568,9 +789,9 @@ export default function FunctionBillScreen() {
 
             <Modal visible={billPreviewVisible} animationType="slide">
                 <SafeAreaView style={[styles.invoiceContainer, { backgroundColor: bg }]}>
-                    <LinearGradient colors={isDark ? ['#1A1A1A', '#1A1A1A'] : ['#7C3AED', '#8B5CF6']} style={[styles.invoiceFixedHeader, { paddingTop: insets.top + (Platform.OS === 'android' ? 14 : 8) }]}>
+                    <LinearGradient colors={isDark ? ['#1A1A1A', '#1A1A1A'] : ['#FF8C00', '#FF8C00']} style={[styles.invoiceFixedHeader, { paddingTop: insets.top + (Platform.OS === 'android' ? 14 : 8) }]}>
                         <View style={styles.invoiceHeaderNav}>
-                            <TouchableOpacity onPress={() => setBillPreviewVisible(false)} style={styles.closeBtnCircle}><Ionicons name="arrow-back" size={20} color="#FFF" /></TouchableOpacity>
+                            <TouchableOpacity onPress={() => setBillPreviewVisible(false)} style={styles.closeBtnCircle}><Ionicons name="arrow-back" size={20} color="#FF8C00" /></TouchableOpacity>
                             <View style={{ flex: 1, marginLeft: 12 }}>
                                 <Text style={styles.invoiceHeaderTitle}>Bill Preview</Text>
                                 <Text style={styles.invoiceHeaderSub}>Marriage & Event</Text>
@@ -579,6 +800,30 @@ export default function FunctionBillScreen() {
                     </LinearGradient>
 
                     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }} showsVerticalScrollIndicator={false}>
+                        <View 
+                            pointerEvents="none"
+                            style={{ 
+                                position: 'absolute', 
+                                top: 0, 
+                                left: 0, 
+                                opacity: 0.05, 
+                                zIndex: -100,
+                                width: 400,
+                            }} 
+                        >
+                            <ThermalReceiptView 
+                                name={customerName}
+                                mobile={customerMobile}
+                                billId={nextBillId}
+                                date={new Date().toLocaleString('en-IN')}
+                                cart={validCart}
+                                total={subtotal}
+                                grandTotal={grandTotal}
+                                shopName={user?.shopName}
+                                shopPhone={user?.phone}
+                            />
+                        </View>
+                        <ViewShot ref={viewShotRef} options={{ format: "jpg", quality: 0.9 }} style={{ backgroundColor: bg, padding: 8 }}>
                         <View style={styles.quickStatsRow}>
                             <View style={[styles.quickStatCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
                                 <Text style={[styles.quickStatValue, { color: textCol }]}>{nextBillId}</Text>
@@ -626,15 +871,16 @@ export default function FunctionBillScreen() {
                             <View style={[styles.summaryLine, { marginTop: 15 }]}><Text style={{ fontWeight: '800', color: textCol, fontSize: 16 }}>Grand Total</Text><Text style={{ fontWeight: '900', fontSize: 22, color: primary }}>₹{grandTotal.toFixed(0)}</Text></View>
                         </View>
                         <View style={{ height: 120 }} />
+                        </ViewShot>
                     </ScrollView>
 
                     <View style={[styles.stickyFooter, { backgroundColor: cardBg, borderTopColor: borderCol, flexDirection: 'row', gap: 10, paddingHorizontal: 16 }]}>
                         <TouchableOpacity 
                             style={[styles.generateBtn, { backgroundColor: '#25D366', flex: 0.35, justifyContent: 'center' }]} 
-                            onPress={handleWhatsAppShare} 
+                            onPress={handleShareImage}
                             activeOpacity={0.8}
                         >
-                            <MaterialCommunityIcons name="whatsapp" size={24} color="#FFF" />
+                            <Ionicons name="share-social" size={24} color="#FFF" />
                             <Text style={[styles.generateBtnText, { marginLeft: 8 }]}>Share</Text>
                         </TouchableOpacity>
 
@@ -665,6 +911,49 @@ export default function FunctionBillScreen() {
                     </View>
                 </SafeAreaView>
             </Modal>
+
+            {/* Printer Selection Modal */}
+            <Modal visible={showPrinterModal} transparent animationType="fade">
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.printerModal, { backgroundColor: cardBg }]}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[styles.modalTitle, { color: textCol }]}>Select Bluetooth Printer</Text>
+                            <TouchableOpacity onPress={() => setShowPrinterModal(false)}>
+                                <Ionicons name="close" size={24} color={textCol} />
+                            </TouchableOpacity>
+                        </View>
+                        
+                        <FlatList
+                            data={pairedDevices}
+                            keyExtractor={item => item.address}
+                            renderItem={({ item }) => (
+                                <TouchableOpacity 
+                                    onPress={() => handleConnectPrinter(item.address)}
+                                    style={[styles.deviceRow, { borderBottomColor: borderCol }]}
+                                >
+                                    <View>
+                                        <Text style={[styles.deviceName, { color: textCol }]}>{item.name || 'Unknown'}</Text>
+                                        <Text style={{ color: subCol, fontSize: 10 }}>{item.address}</Text>
+                                    </View>
+                                    <MaterialCommunityIcons name="bluetooth" size={20} color={primary} />
+                                </TouchableOpacity>
+                            )}
+                            ListEmptyComponent={
+                                <View style={{ padding: 20, alignItems: 'center' }}>
+                                    <Text style={{ color: subCol }}>{isScanning ? 'Scanning...' : 'No paired printers found'}</Text>
+                                </View>
+                            }
+                        />
+                        
+                        <TouchableOpacity 
+                            onPress={scanPrinters} 
+                            style={[styles.modalActionBtn, { backgroundColor: primary }]}
+                        >
+                            <Text style={{ color: '#FFF', fontWeight: 'bold' }}>Refresh List</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -682,7 +971,94 @@ const styles = StyleSheet.create({
     infoTextField: { flex: 1, fontSize: 13, fontWeight: '600', padding: 0 },
     searchBar: { padding: 12, borderBottomWidth: 1 },
     searchInput: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 10 },
-    searchField: { flex: 1, fontSize: 13, padding: 0 },
+    searchField: { flex: 1, fontSize: 13, marginLeft: 8 },
+    thermalCaptureContainer: {
+        width: 400,
+        backgroundColor: '#FFF',
+        padding: 20,
+    },
+    thermalContent: {
+        backgroundColor: '#FFF',
+    },
+    thermalShopName: {
+        fontSize: 28,
+        fontWeight: '900',
+        textAlign: 'center',
+        color: '#000',
+        marginBottom: 5,
+    },
+    thermalShopLoc: {
+        fontSize: 14,
+        color: '#000',
+        textAlign: 'center',
+        fontWeight: '600',
+        lineHeight: 18,
+    },
+    thermalShopContact: {
+        fontSize: 16,
+        color: '#000',
+        textAlign: 'center',
+        fontWeight: '700',
+        marginTop: 5,
+    },
+    thermalDivider: {
+        fontSize: 14,
+        color: '#000',
+        textAlign: 'center',
+        fontWeight: 'bold',
+        marginVertical: 10,
+    },
+    thermalRow: {
+        flexDirection: 'row',
+        marginBottom: 4,
+    },
+    thermalText: {
+        fontSize: 16,
+        color: '#000',
+        fontWeight: '600',
+    },
+    thermalHeader: {
+        fontSize: 18,
+        fontWeight: '900',
+        color: '#000',
+    },
+    thermalItemRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        paddingVertical: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: '#EEE',
+    },
+    thermalItemName: {
+        fontSize: 20,
+        fontWeight: '900',
+        color: '#000',
+    },
+    thermalItemSub: {
+        fontSize: 14,
+        color: '#333',
+        fontWeight: '600',
+    },
+    thermalItemData: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#000',
+    },
+    thermalSummaryRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingVertical: 4,
+    },
+    thermalSummaryLabel: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#000',
+    },
+    thermalSummaryValue: {
+        fontSize: 18,
+        fontWeight: '900',
+        color: '#000',
+    },
     listRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1, padding: 12, marginBottom: 8 },
     selCircle: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
     vegTamil: { fontSize: moderateScale(15), fontWeight: '700' },
@@ -728,4 +1104,12 @@ const styles = StyleSheet.create({
     stickyFooter: { padding: 16, borderTopWidth: 1 },
     generateBtn: { borderRadius: 14, paddingVertical: 16, paddingHorizontal: 20, alignItems: 'center', justifyContent: 'center' },
     generateBtnText: { color: '#FFF', fontWeight: '900', fontSize: 16 },
+    printerStatus: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', borderLeftWidth: 3, paddingVertical: 4, paddingHorizontal: 8, marginTop: 10, borderRadius: 4 },
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
+    printerModal: { borderRadius: 20, padding: 20, maxHeight: '80%' },
+    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+    modalTitle: { fontSize: 18, fontWeight: 'bold' },
+    deviceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1 },
+    deviceName: { fontSize: 14, fontWeight: '600' },
+    modalActionBtn: { marginTop: 20, padding: 15, borderRadius: 12, alignItems: 'center' },
 });

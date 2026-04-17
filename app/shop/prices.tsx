@@ -166,7 +166,7 @@ export default function SetPricesScreen() {
         colors={isDark ? ["#1A1A1A", "#1A1A1A"] : ["#FF8C00", "#FF8C00"]}
         style={[
           styles.header,
-          { paddingTop: insets.top + (Platform.OS === "android" ? verticalScale(10) : 0) },
+          { paddingTop: insets.top + (Platform.OS === "android" ? verticalScale(15) : verticalScale(10)) },
         ]}
       >
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
@@ -263,7 +263,7 @@ export default function SetPricesScreen() {
       >
         <TouchableOpacity activeOpacity={0.8} onPress={handleSave}>
             <LinearGradient
-                colors={['#FF8C00', '#FFA500']}
+                colors={['#FF8C00', '#FF8C00']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.saveButton}
@@ -288,14 +288,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: scale(20),
-    paddingBottom: verticalScale(15),
-    borderBottomLeftRadius: scale(25),
-    borderBottomRightRadius: scale(25),
-    elevation: 5,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 10,
+    paddingBottom: verticalScale(30),
+    borderBottomLeftRadius: scale(32),
+    borderBottomRightRadius: scale(32),
+    elevation: 8,
+    shadowColor: "#FF8C00",
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 10 },
+    shadowRadius: 15,
     zIndex: 10,
   },
   backBtn: {

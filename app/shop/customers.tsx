@@ -170,8 +170,8 @@ export default function CustomersScreen() {
             <StatusBar style="light" backgroundColor="#FF8C00" />
             
             <LinearGradient
-                colors={['#FF8C00', '#FFA500']}
-                style={[styles.header, { paddingTop: insets.top + verticalScale(20) }]}
+                colors={isDark ? ['#1A1A1A', '#1A1A1A'] : ['#FF8C00', '#FF8C00']}
+                style={[styles.header, { paddingTop: insets.top + (Platform.OS === 'android' ? verticalScale(15) : verticalScale(10)) }]}
             >
                 <View style={styles.headerDecor} />
                 <View style={styles.headerTop}>
@@ -304,6 +304,11 @@ const styles = StyleSheet.create({
         borderBottomLeftRadius: scale(32),
         borderBottomRightRadius: scale(32),
         overflow: 'hidden',
+        elevation: 8,
+        shadowColor: '#FF8C00',
+        shadowOpacity: 0.2,
+        shadowOffset: { width: 0, height: 10 },
+        shadowRadius: 15,
     },
     headerDecor: {
         position: 'absolute',

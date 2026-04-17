@@ -25,25 +25,36 @@ const DEFAULT_USERS = [
 export const seedVegetables = async () => {
     console.log('🌱 Starting database seeding...');
     try {
-        // Check if vegetables already exist
-        const existingVegs = await vegetableRepository.getAll();
-        if (existingVegs.length > 0) {
-            console.log('✓ Vegetables already seeded');
-            return true;
-        }
+        // Cleanup: Remove any fish items previously added (categorized under 'Coastal Regions')
+        console.log('Cleaning up removed categories...');
+        await sqliteService.execute(
+            `DELETE FROM vegetables WHERE category = ?`,
+            ['Coastal Regions']
+        );
 
         // Seed vegetables from constants
-        console.log('Adding vegetables from constants...');
+        console.log('Checking for missing vegetables from constants...');
+        let addedCount = 0;
+        let skippedCount = 0;
+
         for (const veg of SOUTHERN_VEGETABLES) {
-            await vegetableRepository.create({
-                name: veg.name,
-                tamil_name: veg.tamilName,
-                image_url: veg.image,
-                category: veg.origin
-            });
-            console.log(`✓ Added: ${veg.name}`);
+            const existing = await vegetableRepository.findByName(veg.name, veg.tamilName);
+            
+            if (!existing) {
+                await vegetableRepository.create({
+                    name: veg.name,
+                    tamil_name: veg.tamilName,
+                    image_url: veg.image,
+                    category: veg.origin
+                });
+                console.log(`✓ Added new: ${veg.name}`);
+                addedCount++;
+            } else {
+                skippedCount++;
+            }
         }
-        console.log('✓ Vegetables seeding complete!');
+        
+        console.log(`✓ Vegetables seeding complete! (Added: ${addedCount}, Skipped: ${skippedCount})`);
         return true;
     } catch (error) {
         console.error('✗ Vegetable seeding failed:', error);
@@ -76,30 +87,31 @@ export async function seedDatabase() {
             }
         }
 
-        // Add initial inventory if not exists for today
-        console.log('Adding initial inventory...');
+        // Add initial inventory if not exists for today (Incremental)
+        console.log('Syncing inventory for today...');
         const vegetables = await vegetableRepository.getAll();
         const today = new Date().toISOString().split('T')[0];
         const existingInventory = await inventoryRepository.getByDate(today);
+        const existingVegIds = new Set(existingInventory.map(i => i.vegetable_id));
 
-        if (existingInventory.length === 0) {
-            for (const veg of vegetables) {
+        let inventoryAddedCount = 0;
+        for (const veg of vegetables) {
+            if (!existingVegIds.has(veg.id)) {
                 try {
                     await inventoryRepository.create({
                         vegetable_id: veg.id,
-                        price: 20 + Math.random() * 30, // Random price between 20-50
+                        price: veg.retail_price || 30, // Use retail price if set, else fallback
                         stock_quantity: 100,
                         unit: 'kg',
                         date: today
                     });
+                    inventoryAddedCount++;
                 } catch (error) {
                     console.warn(`Could not add inventory for ${veg.name}:`, error);
                 }
             }
-            console.log(`✓ Added initial inventory`);
-        } else {
-            console.log(`✓ Inventory for today already exists`);
         }
+        console.log(`✓ Inventory sync complete (Added: ${inventoryAddedCount} missing items for today)`);
 
         console.log('✓ Database seeding completed successfully');
         return true;

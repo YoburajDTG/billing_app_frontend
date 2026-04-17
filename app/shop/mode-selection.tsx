@@ -40,8 +40,8 @@ export default function ModeSelectionScreen() {
             <StatusBar style="light" backgroundColor="#FF8C00" />
 
             <LinearGradient
-                colors={['#FF8C00', '#FFA500']}
-                style={[styles.hero, { paddingTop: insets.top + verticalScale(40) }]}
+                colors={['#FF8C00', '#E67E00']}
+                style={[styles.hero, { paddingTop: insets.top + (Platform.OS === 'android' ? verticalScale(20) : verticalScale(10)) }]}
             >
                 <View style={styles.headerDecor} />
                 <Animated.View entering={ZoomIn.duration(600)} style={styles.avatarCircle}>
@@ -49,7 +49,7 @@ export default function ModeSelectionScreen() {
                 </Animated.View>
                 <Animated.Text entering={FadeInDown.delay(200)} style={styles.greeting}>{language === 'Tamil' ? 'மீண்டும் வருக,' : 'Welcome back,'}</Animated.Text>
                 <Animated.Text entering={FadeInDown.delay(300)} style={styles.userName}>{user?.username || (language === 'Tamil' ? 'உரிமையாளர்' : 'Owner')}</Animated.Text>
-                <Animated.Text entering={FadeInDown.delay(400)} style={styles.shopName}>{user?.shopName || 'SUJI VEGETABLES'}</Animated.Text>
+                <Animated.Text entering={FadeInDown.delay(400)} style={styles.shopName}>{user?.shopName || (language === 'Tamil' ? 'சுஜி காய்கறி கடை' : 'SUJI VEGETABLES SHOP')}</Animated.Text>
                 
                 <View style={styles.heroActions}>
                     <TouchableOpacity onPress={toggleTheme} style={styles.roundActionBtn}>
@@ -113,12 +113,12 @@ export default function ModeSelectionScreen() {
                             onPress={() => router.push('/shop/dashboard')}
                             activeOpacity={0.85}
                         >
-                            <View style={[styles.modeIconCircle, { backgroundColor: '#10B98110' }]}>
-                                <MaterialCommunityIcons name="view-dashboard" size={36} color="#10B981" />
+                            <View style={[styles.modeIconCircle, { backgroundColor: '#FF8C0010' }]}>
+                                <MaterialCommunityIcons name="view-dashboard" size={36} color="#FF8C00" />
                             </View>
                             <View style={styles.modeTextCol}>
                                 <Text style={[styles.modeName, { color: textColor }]}>{language === 'Tamil' ? 'முகப்புத் திரை' : 'Dashboard'}</Text>
-                                <Text style={[styles.modeTamil, { color: '#10B981' }]}>முகப்பு தகவல்கள்</Text>
+                                <Text style={[styles.modeTamil, { color: '#FF8C00' }]}>முகப்பு தகவல்கள்</Text>
                                 <Text style={[styles.modeDesc, { color: subTextColor }]}>{language === 'Tamil' ? 'விற்பனை அறிக்கைகள் மற்றும் இருப்பைக் காண்க' : 'View sales reports, inventory and history'}</Text>
                             </View>
                             <Feather name="chevron-right" size={24} color={subTextColor} />
@@ -134,11 +134,16 @@ const styles = StyleSheet.create({
     container: { flex: 1 },
     hero: {
         paddingHorizontal: scale(30),
-        paddingBottom: verticalScale(40),
+        paddingBottom: verticalScale(50),
         borderBottomLeftRadius: scale(40),
         borderBottomRightRadius: scale(40),
         alignItems: 'center',
         overflow: 'hidden',
+        elevation: 10,
+        shadowColor: '#FF8C00',
+        shadowOpacity: 0.2,
+        shadowRadius: 20,
+        shadowOffset: { width: 0, height: 12 },
     },
     headerDecor: {
         position: 'absolute',

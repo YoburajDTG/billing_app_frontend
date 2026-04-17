@@ -46,6 +46,7 @@ export default function DashboardScreen() {
         totalProducts: 0,
         recentInvoices: [] as any[],
     });
+    const [shopName, setShopName] = useState('');
     const [showTypeModal, setShowTypeModal] = useState(false);
 
     const { isDark, language, toggleLanguage } = useAppTheme();
@@ -59,8 +60,15 @@ export default function DashboardScreen() {
     useFocusEffect(
         useCallback(() => {
             fetchStats();
+            loadShopSettings();
         }, [])
     );
+
+    const loadShopSettings = async () => {
+        const { KEYS, Storage } = require('@/services/storage');
+        const mName = await Storage.getItem(KEYS.MERCHANT_NAME);
+        if (mName) setShopName(mName);
+    };
 
     const fetchStats = async () => {
         setLoading(true);
@@ -130,7 +138,7 @@ export default function DashboardScreen() {
     // Theme colors
     const bg = isDark ? '#0F0F0F' : '#F0F2F5';
     const cardBg = isDark ? '#1C1C1E' : '#FFFFFF';
-    const textCol = isDark ? '#F2F2F7' : '#1A1C1E';
+    const textCol = isDark ? '#FFFFFF' : '#1A1C1E';
     const subCol = isDark ? '#8E8E93' : '#6B7280';
     const borderCol = isDark ? '#2C2C2E' : '#E5E7EB';
     const primary = '#FF8C00';
@@ -154,7 +162,7 @@ export default function DashboardScreen() {
                             {getGreeting()}
                         </Text>
                         <Text style={[styles.shopNameHero, { color: isDark ? textCol : '#FFF' }]} numberOfLines={1}>
-                            {user?.shopName || (language === 'Tamil' ? 'சுஜி காய்கறி கடை' : 'SUJI VEGETABLES')}
+                            {shopName || user?.shopName || (language === 'Tamil' ? 'சுஜி காய்கறி கடை' : 'SUJI VEGETABLES')}
                         </Text>
                     </View>
 
@@ -174,14 +182,6 @@ export default function DashboardScreen() {
                             </TouchableOpacity>
                         </View>
 
-                        <TouchableOpacity
-                            style={[styles.newBillBtn, { backgroundColor: isDark ? primary : 'rgba(255,255,255,0.25)', borderColor: isDark ? 'transparent' : 'rgba(255,255,255,0.4)', borderRadius: scale(14) }]}
-                            onPress={() => setShowTypeModal(true)}
-                            activeOpacity={0.8}
-                        >
-                            <Ionicons name="add" size={20} color="#FFF" />
-                            <Text style={styles.newBillBtnText}>{language === 'Tamil' ? 'பில்' : 'Bill'}</Text>
-                        </TouchableOpacity>
                     </View>
                 </View>
             </LinearGradient>
@@ -204,7 +204,7 @@ export default function DashboardScreen() {
             >
                 {/* ── HERO BANNER (Scrollable) ── */}
                 <LinearGradient
-                    colors={isDark ? ['#1A1A1A', '#121212'] : ['#FF8C00', '#FF7F50']}
+                    colors={isDark ? ['#1A1A1A', '#121212'] : ['#FF8C00', '#E67E00']}
                     style={styles.hero}
                 >
                     {/* Decorative circles */}
@@ -248,30 +248,34 @@ export default function DashboardScreen() {
 
                 <View style={styles.body}>
                     {/* ── DAILY MOTIVATION ── */}
-                    <Animated.View 
-                        entering={FadeInUp.delay(150).duration(600)} 
+                    <View 
                         style={[
                             styles.quoteCard, 
                             { 
-                                backgroundColor: isDark ? '#1C1C1E' : '#FFF9F0', 
-                                borderColor: isDark ? '#2C2C2E' : '#FDE68A' 
+                                backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', 
+                                borderColor: isDark ? '#2C2C2E' : '#FF8C00',
+                                borderLeftWidth: 6,
+                                borderLeftColor: '#FF8C00',
+                                elevation: 4,
                             }
                         ]}
                     >
                         <MaterialCommunityIcons 
                             name="format-quote-open" 
                             size={20} 
-                            color={primary} 
-                            style={{ opacity: 0.3, position: 'absolute', top: 10, left: 10 }} 
+                            color="#FF8C00" 
+                            style={{ opacity: 0.2, position: 'absolute', top: 5, left: 10 }} 
                         />
-                        <Text style={[styles.quoteText, { color: textCol }]}>{quote}</Text>
+                        <Text style={[styles.quoteText, { color: isDark ? '#FFFFFF' : '#000000', fontWeight: '800' }]}>
+                            {quote}
+                        </Text>
                         <MaterialCommunityIcons 
                             name="format-quote-close" 
                             size={20} 
-                            color={primary} 
-                            style={{ opacity: 0.3, position: 'absolute', bottom: 10, right: 10 }} 
+                            color="#FF8C00" 
+                            style={{ opacity: 0.2, position: 'absolute', bottom: 5, right: 10 }} 
                         />
-                    </Animated.View>
+                    </View>
 
                     {/* ── QUICK STATS (Customers & Products) ── */}
                     <Animated.View entering={FadeInUp.delay(200).duration(400)} style={styles.quickStatsRow}>
@@ -283,8 +287,8 @@ export default function DashboardScreen() {
                             <Text style={[styles.quickStatLabel, { color: subCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Customers'}</Text>
                         </View>
                         <View style={[styles.quickStatCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
-                            <View style={[styles.quickStatIcon, { backgroundColor: '#10B98115' }]}>
-                                <MaterialCommunityIcons name="food-apple" size={20} color="#10B981" />
+                            <View style={[styles.quickStatIcon, { backgroundColor: '#FF8C0015' }]}>
+                                <MaterialCommunityIcons name="food-apple" size={20} color="#FF8C00" />
                             </View>
                             <Text style={[styles.quickStatValue, { color: textCol }]} numberOfLines={1} adjustsFontSizeToFit>{stats.totalProducts}</Text>
                             <Text style={[styles.quickStatLabel, { color: subCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'பொருட்கள்' : 'Products'}</Text>
@@ -344,8 +348,8 @@ export default function DashboardScreen() {
                                 onPress={() => router.push('/shop/history')}
                                 activeOpacity={0.85}
                             >
-                                <View style={[styles.actionIconBox, { backgroundColor: '#10B98115' }]}>
-                                    <MaterialCommunityIcons name="history" size={26} color="#10B981" />
+                                <View style={[styles.actionIconBox, { backgroundColor: '#FF8C0015' }]}>
+                                    <MaterialCommunityIcons name="history" size={26} color="#FF8C00" />
                                 </View>
                                 <Text style={[styles.actionTitle, { color: textCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'ரசீது வரலாறு' : 'History'}</Text>
                                 <Text style={[styles.actionDesc, { color: subCol }]}>{language === 'Tamil' ? 'அனைத்து ரசீதுகள்' : 'All invoices'}</Text>
@@ -418,8 +422,8 @@ export default function DashboardScreen() {
                                         <Text style={[styles.invoiceTotal, { color: primary }]}>
                                             ₹{Number(inv.total_amount).toFixed(0)}
                                         </Text>
-                                        <View style={[styles.paidBadge, { backgroundColor: '#10B98115' }]}>
-                                            <Text style={styles.paidText}>{language === 'Tamil' ? 'செலுத்தப்பட்டது' : 'Paid'}</Text>
+                                        <View style={[styles.paidBadge, { backgroundColor: '#FF8C0015' }]}>
+                                            <Text style={[styles.paidText, { color: '#FF8C00' }]}>{language === 'Tamil' ? 'செலுத்தப்பட்டது' : 'Paid'}</Text>
                                         </View>
                                     </View>
                                 </Animated.View>
@@ -439,7 +443,16 @@ export default function DashboardScreen() {
                         )}
                     </Animated.View>
 
-
+                    {/* ── SHOP BRANDING FOOTER ── */}
+                    <View style={styles.footerBranding}>
+                        <Text style={[styles.footerShopName, { color: textCol }]}>
+                            {shopName || user?.shopName || 'SUJI VEGETABLES'}
+                        </Text>
+                        <Text style={[styles.footerTagline, { color: subCol }]}>
+                            {language === 'Tamil' ? 'தரமான பொருட்கள், நியாயமான விலை!' : 'Fresh Quality, Fair Prices!'}
+                        </Text>
+                        <View style={styles.footerLine} />
+                    </View>
                 </View>
             </ScrollView>
 
@@ -514,8 +527,13 @@ const styles = StyleSheet.create({
         paddingBottom: verticalScale(20),
         overflow: 'hidden',
         position: 'relative',
-        borderBottomLeftRadius: scale(24),
-        borderBottomRightRadius: scale(24),
+        borderBottomLeftRadius: scale(32),
+        borderBottomRightRadius: scale(32),
+        elevation: 8,
+        shadowColor: '#FF8C00',
+        shadowOpacity: 0.15,
+        shadowRadius: 15,
+        shadowOffset: { width: 0, height: 10 },
     },
     decor1: {
         position: 'absolute',
@@ -631,8 +649,8 @@ const styles = StyleSheet.create({
     },
     quickStatCard: {
         flex: 1,
-        borderRadius: scale(18),
-        padding: scale(14),
+        borderRadius: scale(15),
+        padding: scale(10),
         alignItems: 'center',
         borderWidth: 1,
         elevation: 2,
@@ -642,15 +660,15 @@ const styles = StyleSheet.create({
         shadowRadius: 6,
     },
     quickStatIcon: {
-        width: scale(42),
-        height: scale(42),
-        borderRadius: scale(12),
+        width: scale(36),
+        height: scale(36),
+        borderRadius: scale(10),
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: verticalScale(8),
+        marginBottom: verticalScale(6),
     },
     quickStatValue: {
-        fontSize: moderateScale(20),
+        fontSize: moderateScale(17),
         fontWeight: '900',
         marginBottom: 2,
     },
@@ -788,7 +806,7 @@ const styles = StyleSheet.create({
     paidText: {
         fontSize: moderateScale(10),
         fontWeight: '800',
-        color: '#10B981',
+        color: '#FF8C00',
     },
     // Empty state
     emptyBox: {
@@ -893,10 +911,10 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     quoteCard: {
-        paddingVertical: verticalScale(22),
-        paddingHorizontal: scale(25),
-        borderRadius: scale(20),
-        marginBottom: verticalScale(20),
+        paddingVertical: verticalScale(15),
+        paddingHorizontal: scale(20),
+        borderRadius: scale(16),
+        marginBottom: verticalScale(16),
         borderWidth: 1,
         alignItems: 'center',
         justifyContent: 'center',
@@ -909,12 +927,36 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
     quoteText: {
-        fontSize: moderateScale(15),
+        fontSize: moderateScale(13),
         fontWeight: '700',
         textAlign: 'center',
         fontStyle: 'italic',
         lineHeight: moderateScale(22),
         paddingHorizontal: scale(10),
+    },
+    footerBranding: {
+        marginTop: verticalScale(40),
+        marginBottom: verticalScale(20),
+        alignItems: 'center',
+        opacity: 0.6,
+    },
+    footerShopName: {
+        fontSize: moderateScale(18),
+        fontWeight: '900',
+        letterSpacing: 1,
+        textTransform: 'uppercase',
+    },
+    footerTagline: {
+        fontSize: moderateScale(12),
+        fontWeight: '600',
+        marginTop: 4,
+    },
+    footerLine: {
+        width: scale(40),
+        height: 2,
+        backgroundColor: '#FF8C00',
+        marginTop: 10,
+        borderRadius: 1,
     },
 });
 

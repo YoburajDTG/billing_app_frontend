@@ -21,6 +21,8 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
 import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -29,6 +31,9 @@ export default function ProductsScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Vegetable | null>(null);
+
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
 
   const [name, setName] = useState("");
   const [tamilName, setTamilName] = useState("");
@@ -80,16 +85,6 @@ export default function ProductsScreen() {
       return;
     }
 
-    if (category.trim().length < 3) {
-      Alert.alert(
-        language === "Tamil" ? "சரிபார்ப்பு பிழை" : "Validation Error",
-        language === "Tamil"
-          ? "வகை குறைந்தது 3 எழுத்துக்கள் இருக்க வேண்டும்"
-          : "Category must be at least 3 characters",
-      );
-      return;
-    }
-
     try {
       if (editingProduct) {
         await vegetableRepository.update(editingProduct.id, {
@@ -109,13 +104,52 @@ export default function ProductsScreen() {
       setModalVisible(false);
       resetForm();
       fetchProducts();
-    } catch {
+    } catch (error) {
+      console.error("Save error:", error);
       Alert.alert(
         language === "Tamil" ? "பிழை" : "Error",
         language === "Tamil"
           ? "பொருளைச் சேமிப்பதில் தோல்வி"
           : "Failed to save product",
       );
+    }
+  };
+
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(
+        language === "Tamil" ? "பிழை" : "Error",
+        language === "Tamil"
+          ? "கேலரி அனுமதி தேவை"
+          : "Sorry, we need camera roll permissions to make this work!"
+      );
+      return;
+    }
+
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      const selectedImage = result.assets[0].uri;
+      
+      // Copy to persistent storage
+      try {
+        const fileName = `product_${Date.now()}.jpg`;
+        const destPath = `${FileSystem.documentDirectory}${fileName}`;
+        await FileSystem.copyAsync({
+          from: selectedImage,
+          to: destPath
+        });
+        setImageUrl(destPath);
+      } catch (error) {
+        console.error("Image copy error:", error);
+        setImageUrl(selectedImage);
+      }
     }
   };
 
@@ -148,6 +182,59 @@ export default function ProductsScreen() {
     );
   };
 
+  const handleBulkDelete = () => {
+    if (selectedItems.size === 0) return;
+
+    Alert.alert(
+      language === "Tamil" ? "மொத்தமாக நீக்கு" : "Bulk Delete",
+      language === "Tamil"
+        ? `${selectedItems.size} பொருட்களை நீக்க விரும்புகிறீர்களா?`
+        : `Are you sure you want to delete ${selectedItems.size} items?`,
+      [
+        { text: language === "Tamil" ? "ரத்து" : "Cancel", style: "cancel" },
+        {
+          text: language === "Tamil" ? "நீக்கு" : "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              for (const id of selectedItems) {
+                await vegetableRepository.delete(id);
+              }
+              cancelSelection();
+              fetchProducts();
+            } catch {
+              Alert.alert(
+                language === "Tamil" ? "பிழை" : "Error",
+                language === "Tamil"
+                  ? "பொருட்களை நீக்குவதில் தோல்வி"
+                  : "Failed to delete products",
+              );
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const toggleItemSelection = (id: string) => {
+    const newSelection = new Set(selectedItems);
+    if (newSelection.has(id)) {
+      newSelection.delete(id);
+      if (newSelection.size === 0) {
+        setIsSelectionMode(false);
+      }
+    } else {
+      newSelection.add(id);
+      setIsSelectionMode(true);
+    }
+    setSelectedItems(newSelection);
+  };
+
+  const cancelSelection = () => {
+    setSelectedItems(new Set());
+    setIsSelectionMode(false);
+  };
+
   const resetForm = () => {
     setName("");
     setTamilName("");
@@ -176,78 +263,104 @@ export default function ProductsScreen() {
   const subTextColor = isDark ? "#94A3B8" : "#64748B";
   const primaryColor = "#FF8C00";
 
-  const renderItem = ({ item, index }: { item: Vegetable; index: number }) => (
-    <Animated.View
-      entering={FadeInUp.delay(30 * index).duration(400)}
-      style={[styles.card, { backgroundColor: cardBg }]}
-    >
-      <View style={styles.cardContent}>
-        <Image
-          source={getVegetableImage(item.image_url || "", item.name)}
-          style={styles.productImage}
-        />
-        <View style={styles.productInfo}>
-          <Text style={[styles.tamilTitle, { color: textColor }]}>
-            {item.tamil_name || item.name}
-          </Text>
-          <Text style={[styles.engTitle, { color: subTextColor }]}>
-            {item.name}
-          </Text>
-          {item.category ? (
-            <View
-              style={[
-                styles.catBadge,
-                { backgroundColor: primaryColor + "10" },
-              ]}
-            >
-              <Text style={[styles.catBadgeText, { color: primaryColor }]}>
-                {item.category}
-              </Text>
+  const renderItem = ({ item, index }: { item: Vegetable; index: number }) => {
+    const isSelected = selectedItems.has(item.id);
+    return (
+      <Animated.View
+        entering={FadeInUp.delay(30 * index).duration(400)}
+        style={[
+          styles.card, 
+          { backgroundColor: cardBg },
+          isSelected && { borderColor: primaryColor, borderWidth: 2 }
+        ]}
+      >
+        <TouchableOpacity 
+          style={styles.cardContent}
+          onPress={() => isSelectionMode ? toggleItemSelection(item.id) : openEditModal(item)}
+          onLongPress={() => toggleItemSelection(item.id)}
+          activeOpacity={0.7}
+        >
+          {isSelectionMode && (
+            <View style={styles.checkWrapper}>
+              <Ionicons 
+                name={isSelected ? "checkbox" : "square-outline"} 
+                size={24} 
+                color={isSelected ? primaryColor : subTextColor} 
+              />
             </View>
-          ) : null}
-        </View>
-        <View style={styles.actionGroup}>
-          <TouchableOpacity
-            onPress={() => openEditModal(item)}
-            style={styles.iconBtn}
-          >
-            <Feather name="edit-2" size={18} color="#94A3B8" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => item.id && handleDelete(item.id)}
-            style={styles.iconBtn}
-          >
-            <Feather name="trash-2" size={18} color="#EF4444" />
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Animated.View>
-  );
+          )}
+          <Image
+            source={getVegetableImage(item.image_url || "", item.name)}
+            style={styles.productImage}
+          />
+          <View style={styles.productInfo}>
+            <Text style={[styles.tamilTitle, { color: textColor }]}>
+              {item.tamil_name || item.name}
+            </Text>
+            <Text style={[styles.engTitle, { color: subTextColor }]}>
+              {item.name}
+            </Text>
+          </View>
+          {!isSelectionMode && (
+            <View style={styles.actionGroup}>
+              <TouchableOpacity
+                onPress={() => openEditModal(item)}
+                style={styles.iconBtn}
+              >
+                <Feather name="edit-2" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => item.id && handleDelete(item.id)}
+                style={styles.iconBtn}
+              >
+                <Feather name="trash-2" size={18} color="#EF4444" />
+              </TouchableOpacity>
+            </View>
+          )}
+        </TouchableOpacity>
+      </Animated.View>
+    );
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: background }]}>
       <StatusBar style="light" backgroundColor="#FF8C00" />
 
       <LinearGradient
-        colors={["#FF8C00", "#FFA500"]}
-        style={[styles.header, { paddingTop: insets.top + verticalScale(20) }]}
+        colors={["#FF8C00", "#FF8C00"]}
+        style={[styles.header, { paddingTop: insets.top + (Platform.OS === 'android' ? verticalScale(15) : verticalScale(10)) }]}
       >
         <View style={styles.headerDecor} />
         <View style={styles.headerTop}>
           <View>
             <Text style={styles.headerTitle}>
-              {language === "Tamil" ? "பொருட்கள்" : "Products"}
+              {isSelectionMode 
+                ? `${selectedItems.size} ${language === "Tamil" ? "தேர்வு செய்யப்பட்டுள்ளது" : "Selected"}`
+                : (language === "Tamil" ? "பொருட்கள்" : "Products")
+              }
             </Text>
-            <Text style={styles.headerSubtitle}>
-              {products.length}{" "}
-              {language === "Tamil"
-                ? "பொருட்கள் பட்டியலில் உள்ளன"
-                : "items in inventory"}
-            </Text>
+            {!isSelectionMode && (
+              <Text style={styles.headerSubtitle}>
+                {products.length} {language === "Tamil" ? "பொருட்கள் பட்டியலில் உள்ளன" : "items in inventory"}
+              </Text>
+            )}
           </View>
-          <TouchableOpacity style={styles.addTrigger} onPress={openAddModal}>
-            <Ionicons name="add" size={28} color="#FF8C00" />
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            {isSelectionMode ? (
+              <>
+                <TouchableOpacity style={styles.headerActionBtn} onPress={cancelSelection}>
+                  <Feather name="x" size={24} color="#FFF" />
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.headerActionBtn, styles.deleteAction]} onPress={handleBulkDelete}>
+                  <Feather name="trash-2" size={24} color="#FFF" />
+                </TouchableOpacity>
+              </>
+            ) : (
+              <TouchableOpacity style={styles.addTrigger} onPress={openAddModal}>
+                <Ionicons name="add" size={28} color="#FF8C00" />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       </LinearGradient>
 
@@ -384,26 +497,30 @@ export default function ProductsScreen() {
 
             <View style={styles.inputWrapper}>
               <Text style={[styles.inputLabel, { color: subTextColor }]}>
-                {language === "Tamil" ? "வகை" : "Category"}
+                {language === "Tamil" ? "புகைப்படம்" : "Product Image"}
               </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    color: textColor,
-                    borderColor: isDark ? "#333" : "#E2E8F0",
-                    backgroundColor: isDark ? "#2C2C2C" : "#F8FAFC",
-                  },
-                ]}
-                value={category}
-                onChangeText={setCategory}
-                placeholder={
-                  language === "Tamil"
-                    ? "காய்கறிகள், கீரைகள் போன்றவை..."
-                    : "Essentials, Roots, etc."
-                }
-                placeholderTextColor="#94A3B8"
-              />
+              <View style={styles.imagePickerRow}>
+                <TouchableOpacity 
+                  style={[styles.imagePickerBtn, { backgroundColor: isDark ? "#333" : "#F1F5F9" }]} 
+                  onPress={pickImage}
+                >
+                  {imageUrl ? (
+                    <Image source={{ uri: imageUrl }} style={styles.pickerPreview} />
+                  ) : (
+                    <View style={styles.pickerPlaceholder}>
+                      <Ionicons name="camera" size={32} color={primaryColor} />
+                      <Text style={[styles.pickerText, { color: primaryColor }]}>
+                        {language === "Tamil" ? "புகைப்படத்தை மாற்றவும்" : "Select Image"}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+                {imageUrl ? (
+                  <TouchableOpacity onPress={() => setImageUrl("")} style={styles.removeImageBtn}>
+                    <Feather name="x-circle" size={24} color="#EF4444" />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
             </View>
 
             <View style={styles.sheetActions}>
@@ -449,6 +566,11 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: scale(32),
     borderBottomRightRadius: scale(32),
     overflow: "hidden",
+    elevation: 8,
+    shadowColor: '#FF8C00',
+    shadowOpacity: 0.2,
+    shadowRadius: 15,
+    shadowOffset: { width: 0, height: 10 },
   },
   headerDecor: {
     position: "absolute",
@@ -636,5 +758,56 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontSize: moderateScale(18),
     fontWeight: "800",
+  },
+  imagePickerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: scale(15),
+  },
+  imagePickerBtn: {
+    width: scale(120),
+    height: scale(120),
+    borderRadius: scale(20),
+    borderWidth: 2,
+    borderColor: "#E2E8F0",
+    borderStyle: "dashed",
+    overflow: "hidden",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  pickerPreview: {
+    width: "100%",
+    height: "100%",
+  },
+  pickerPlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: verticalScale(8),
+  },
+  pickerText: {
+    fontSize: moderateScale(12),
+    fontWeight: "700",
+  },
+  removeImageBtn: {
+    padding: scale(10),
+  },
+  headerActions: {
+    flexDirection: "row",
+    gap: scale(15),
+    alignItems: "center",
+  },
+  headerActionBtn: {
+    width: scale(44),
+    height: scale(44),
+    borderRadius: scale(22),
+    backgroundColor: "rgba(255,255,255,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  deleteAction: {
+    backgroundColor: "#EF4444",
+  },
+  checkWrapper: {
+    marginRight: scale(12),
   },
 });

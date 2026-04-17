@@ -12,8 +12,14 @@ import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ThermalPrinter } from "@/utils/thermalPrinter";
 import { useFocusEffect } from "@react-navigation/native";
+import { NativeModules } from 'react-native';
+import * as Contacts from 'expo-contacts';
+import ViewShot, { captureRef } from 'react-native-view-shot';
+import * as Sharing from 'expo-sharing';
+const { BluetoothManager } = NativeModules;
 
 import {
   Alert,
@@ -57,15 +63,10 @@ type BillItem = Vegetable & {
 const CATEGORIES = [
   "All Items",
   "Favourites",
-  "Essentials",
-  "Root Veggies",
-  "Greens",
-  "Gourds",
-  "Others",
 ];
 
 export default function ShopScreen() {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const navigation = useNavigation();
   const router = useRouter();
   const { mode, timestamp } = useLocalSearchParams<{ mode: string; timestamp?: string }>();
@@ -93,6 +94,21 @@ export default function ShopScreen() {
   const [discount, setDiscount] = useState(0);
   const [nextBillId, setNextBillId] = useState("");
   const [printerPreference, setPrinterPreference] = useState<'2inch' | '3inch'>('2inch');
+  const [shopName, setShopName] = useState("");
+  const [isPrinterConnected, setIsPrinterConnected] = useState(false);
+  const [showPrinterModal, setShowPrinterModal] = useState(false);
+  const [pairedDevices, setPairedDevices] = useState<any[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    if (billPreviewVisible) {
+      // Ensure we start at the top of the invoice
+      setTimeout(() => {
+        scrollRef.current?.scrollTo({ y: 0, animated: false });
+      }, 100);
+    }
+  }, [billPreviewVisible]);
 
   useEffect(() => {
     // Hide default header
@@ -101,8 +117,41 @@ export default function ShopScreen() {
   }, []);
 
   const loadSettings = async () => {
-    const pSize = await Storage.getItem(KEYS.PRINTER_SIZE);
+    const [pSize, mName] = await Promise.all([
+      Storage.getItem(KEYS.PRINTER_SIZE),
+      Storage.getItem(KEYS.MERCHANT_NAME)
+    ]);
     if (pSize) setPrinterPreference(pSize);
+    if (mName) setShopName(mName);
+
+    const lastPrinter = await Storage.getItem('last_printer');
+    if (lastPrinter) {
+      handleConnectPrinter(lastPrinter.address);
+    }
+  };
+
+  const handleConnectPrinter = async (address: string) => {
+    try {
+      const success = await ThermalPrinter.connect(address);
+      if (success) {
+        setIsPrinterConnected(true);
+        setShowPrinterModal(false);
+        const devices = await ThermalPrinter.getPairedDevices();
+        const device = devices.find((d: any) => d.address === address);
+        if (device) await Storage.setItem('last_printer', device);
+      } else {
+        Alert.alert('Error', 'Failed to connect to printer');
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const scanPrinters = async () => {
+    setIsScanning(true);
+    const devices = await ThermalPrinter.discoverDevices();
+    setPairedDevices(devices);
+    setIsScanning(false);
   };
 
   useEffect(() => {
@@ -290,8 +339,6 @@ export default function ShopScreen() {
       } else {
         data = [];
       }
-    } else if (selectedCategory !== "All Items") {
-      data = data.filter((v) => v.category === selectedCategory);
     }
 
     // Apply Priority Sorting based on Tamil Name
@@ -387,6 +434,20 @@ export default function ShopScreen() {
     setCart([...filtered, newItem]);
     setModalVisible(false);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const toggleFavourite = async (vegId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const currentFavourites = user?.top_selling_vegetables || [];
+    let newFavourites: string[];
+    
+    if (currentFavourites.includes(vegId)) {
+        newFavourites = currentFavourites.filter(id => id !== vegId);
+    } else {
+        newFavourites = [...currentFavourites, vegId];
+    }
+    
+    await updateUser({ top_selling_vegetables: newFavourites });
   };
 
   const handleCheckout = async () => {
@@ -515,7 +576,25 @@ export default function ShopScreen() {
       
       // Update PDF data with the real ID from DB (just in case it changed)
       const finalBillData = { ...billData, billNumber: savedBill.id };
-      await generateBillPDF(finalBillData, { printDirect, printerSize });
+      
+      if (isPrinterConnected) {
+        await ThermalPrinter.printReceipt({
+          shopName: finalBillData.shopName,
+          billId: finalBillData.billNumber,
+          date: finalBillData.date,
+          items: finalBillData.items.map((i: any) => ({
+            name: i.name,
+            tamilName: i.tamilName,
+            quantity: i.quantity,
+            unitPrice: i.price,
+            totalPrice: i.total
+          })),
+          totalAmount: finalBillData.grandTotal,
+          customerName: finalBillData.userName
+        });
+      } else {
+        await generateBillPDF(finalBillData, { printDirect, printerSize });
+      }
       
       Alert.alert(
         language === 'Tamil' ? 'வெற்றி' : "Success", 
@@ -530,6 +609,179 @@ export default function ShopScreen() {
     } catch (error) {
       console.error(error);
       Alert.alert("Error", "Could not complete bill process");
+    }
+  };
+
+  const handlePickContact = async () => {
+    try {
+        const { status } = await Contacts.requestPermissionsAsync();
+        if (status === 'granted') {
+            const contactResult = await Contacts.presentContactPickerAsync();
+            if (contactResult) {
+                // To be absolute sure we get all details, fetch by ID
+                const contact = await Contacts.getContactByIdAsync(contactResult.id);
+                
+                if (contact) {
+                    // Extract Name
+                    let displayName = contact.name;
+                    if (!displayName || displayName === 'undefined') {
+                        displayName = [contact.firstName, contact.middleName, contact.lastName].filter(Boolean).join(' ');
+                    }
+                    if (displayName && displayName !== 'undefined') setCustomerName(displayName);
+    if (contact.phoneNumbers && contact.phoneNumbers.length > 0) {
+                        // Priority: mobile > home > work > first available
+                        const mobileObj = contact.phoneNumbers.find(p => p.label === 'mobile' || p.label === 'Mobile') || contact.phoneNumbers[0];
+                        const rawNumber = mobileObj.number || '';
+                        const digits = rawNumber.replace(/\D/g, '').slice(-10);
+                        if (digits) setCustomerMobile(digits);
+                    }
+                }
+            }
+        } else {
+            Alert.alert('Permission Denied', 'Please allow contact access to pick a customer.');
+        }
+    } catch (error: any) {
+        console.error('Contact picker error:', error);
+        Alert.alert('Error', 'Could not open contacts: ' + (error?.message || 'Unknown error'));
+    }
+  };
+
+  const thermalShotRef = useRef<any>(null);
+  const viewShotRef = useRef<any>(null);
+
+  const ThermalReceiptView = ({ name, mobile, billId, date, cart, total, disc, shopName, shopPhone }: any) => (
+    <ViewShot 
+      ref={thermalShotRef} 
+      options={{ format: 'png', quality: 1.0 }} 
+      style={styles.thermalCaptureContainer}
+    >
+      <View style={styles.thermalContent}>
+        <Text style={styles.thermalShopName}>சுஜி காய்கறி கடை</Text>
+        <Text style={styles.thermalShopLoc}>பாண்டி - திண்டிவனம் மெயின் ரோடு, கிளியனூர்.</Text>
+        <Text style={styles.thermalShopContact}>Phone: {shopPhone || "9095938085"}</Text>
+        
+        <Text style={styles.thermalDivider}>------------------------------------------</Text>
+        
+        <View style={styles.thermalRow}>
+          <Text style={styles.thermalText}>Date: {date}</Text>
+        </View>
+        <View style={styles.thermalRow}>
+          <Text style={styles.thermalText}>Bill No: {billId}</Text>
+        </View>
+        <View style={styles.thermalRow}>
+          <Text style={styles.thermalText}>Customer: {name || (language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Walk-in Customer')}</Text>
+        </View>
+
+        <View style={[styles.thermalRow, { marginTop: 10, borderBottomWidth: 2, borderBottomColor: '#000', paddingBottom: 5 }]}>
+          <Text style={[styles.thermalHeader, { flex: 2 }]}>Item</Text>
+          <Text style={[styles.thermalHeader, { flex: 1, textAlign: 'center' }]}>Qty</Text>
+          <Text style={[styles.thermalHeader, { flex: 1, textAlign: 'right' }]}>Total</Text>
+        </View>
+
+        {cart.map((item: any, idx: number) => (
+          <View key={idx} style={styles.thermalItemRow}>
+            <View style={{ flex: 2 }}>
+              <Text style={styles.thermalItemName}>{item.tamilName || item.name}</Text>
+              <Text style={styles.thermalItemSub}>₹{item.price}/kg</Text>
+            </View>
+            <Text style={[styles.thermalItemData, { flex: 1, textAlign: 'center' }]}>{item.quantity}kg</Text>
+            <Text style={[styles.thermalItemData, { flex: 1, textAlign: 'right' }]}>₹{item.total.toFixed(0)}</Text>
+          </View>
+        ))}
+
+        <Text style={styles.thermalDivider}>------------------------------------------</Text>
+        
+        <View style={styles.thermalSummaryRow}>
+          <Text style={styles.thermalSummaryLabel}>Sub-Total:</Text>
+          <Text style={styles.thermalSummaryValue}>₹{total.toFixed(0)}</Text>
+        </View>
+
+        {parseFloat(disc) > 0 && (
+          <View style={styles.thermalSummaryRow}>
+            <Text style={styles.thermalSummaryLabel}>Discount:</Text>
+            <Text style={styles.thermalSummaryValue}>- ₹{parseFloat(disc).toFixed(0)}</Text>
+          </View>
+        )}
+
+        <View style={[styles.thermalSummaryRow, { borderBottomWidth: 3, borderBottomColor: '#000', paddingBottom: 5 }]}>
+          <Text style={[styles.thermalSummaryLabel, { fontSize: 24, paddingVertical: 5 }]}>Grand Total:</Text>
+          <Text style={[styles.thermalSummaryValue, { fontSize: 24, paddingVertical: 5 }]}>₹{(total - (parseFloat(disc) || 0)).toFixed(0)}</Text>
+        </View>
+        
+        <Text style={[styles.thermalShopLoc, { marginTop: 20, fontStyle: 'italic' }]}>நன்றி! மீண்டும் வருக.</Text>
+      </View>
+    </ViewShot>
+  );
+
+  const handleShareImage = async () => {
+    try {
+      if (!thermalShotRef.current) {
+        Alert.alert('Error', 'Receipt view not ready');
+        return;
+      }
+
+      // Capture using the ViewShot component's internal capture method
+      const uri = await thermalShotRef.current.capture();
+      console.log('Capture success:', uri);
+
+      const cleanPhone = (customerMobile || "").trim().replace(/\D/g, '');
+      const whatsAppNumber = cleanPhone.length >= 10 ? `+91${cleanPhone.slice(-10)}` : '';
+
+      try {
+        const hasNativeShare = !!NativeModules.RNShare;
+        
+        // PURE IMAGE DIRECT SHARING - HIGH COMPATIBILITY MODE
+        if (hasNativeShare && cleanPhone.length >= 10) {
+          try {
+            const Share = require('react-native-share').default;
+            const FileSystem = require('expo-file-system');
+            
+            const targetPhone = `91${cleanPhone.slice(-10)}`;
+            console.log('Direct Target Injection:', targetPhone);
+            
+            // Step 1: Ensure image is in a stable cache location with .jpg extension
+            const sharePath = FileSystem.cacheDirectory + `bill_${Date.now()}.jpg`;
+            await FileSystem.copyAsync({ from: uri, to: sharePath });
+            const shareUri = `file://${sharePath.replace('file://', '')}`;
+
+            const shareOptions = {
+              social: Share.Social.WHATSAPP,
+              whatsAppNumber: targetPhone,
+              url: shareUri,
+              type: 'image/jpeg',
+              appId: "com.whatsapp",
+              forceFullApp: true,
+            };
+            
+            // Step 2: Attempt standard WhatsApp
+            try {
+              await Share.shareSingle(shareOptions);
+            } catch (waErr) {
+              console.warn('Standard WhatsApp failed, trying Business version...');
+              // Try WhatsApp Business as fallback
+              await Share.shareSingle({
+                ...shareOptions,
+                appId: "com.whatsapp.w4b"
+              });
+            }
+            return;
+          } catch (singleErr) {
+            console.error('All direct injection attempts failed:', singleErr);
+            // OS level security forces the share picker - we'll use the most direct one available
+            await Sharing.shareAsync(uri);
+            return;
+          }
+        } else {
+          // If no phone or no native module, ALWAYS use system share for the IMAGE
+          await Sharing.shareAsync(uri);
+        }
+      } catch (err) {
+        console.error('Final image-only share block failed:', err);
+        await Sharing.shareAsync(uri);
+      }
+    } catch (error) {
+      console.error('Share image error:', error);
+      Alert.alert('Error', 'Failed to generate invoice image');
     }
   };
 
@@ -616,7 +868,7 @@ export default function ShopScreen() {
   );
 
   const primaryColor = "#FF8C00";
-  const accentColor = "#FFA000";
+  const accentColor = "#E67E00";
   const textColor = isDark ? "#FFFFFF" : "#1A1C1E";
   const labelColor = isDark ? "#BBB" : "#6B7280";
   const cardBg = isDark ? "#1E1E1E" : "#FFFFFF";
@@ -640,6 +892,20 @@ export default function ShopScreen() {
         ]}
         onPress={() => handleItemPress(item)}
       >
+        <TouchableOpacity 
+          style={[styles.favouriteBtn, { backgroundColor: isDark ? '#333' : '#F8FAFC' }]}
+          onPress={(e) => {
+            e.stopPropagation();
+            toggleFavourite(item.id);
+          }}
+        >
+          <Ionicons 
+            name={user?.top_selling_vegetables?.includes(item.id) ? "star" : "star-outline"} 
+            size={16} 
+            color={user?.top_selling_vegetables?.includes(item.id) ? "#FFD700" : labelColor} 
+          />
+        </TouchableOpacity>
+
         {isSelected && (
           <View style={styles.checkBadge}>
             <Feather name="check" size={12} color="#FFF" />
@@ -764,6 +1030,20 @@ export default function ShopScreen() {
         ]}
         onPress={() => handleItemPress(item)}
       >
+        <TouchableOpacity 
+          style={[styles.favouriteBtnList, { backgroundColor: isDark ? '#333' : '#F8FAFC' }]}
+          onPress={(e) => {
+            e.stopPropagation();
+            toggleFavourite(item.id);
+          }}
+        >
+          <Ionicons 
+            name={user?.top_selling_vegetables?.includes(item.id) ? "star" : "star-outline"} 
+            size={14} 
+            color={user?.top_selling_vegetables?.includes(item.id) ? "#FFD700" : labelColor} 
+          />
+        </TouchableOpacity>
+
         {isSelected && (
           <View
             style={[styles.checkBadge, { top: -scale(6), right: -scale(6) }]}
@@ -892,49 +1172,26 @@ export default function ShopScreen() {
           { paddingTop: insets.top + (Platform.OS === "android" ? 10 : 0) },
         ]}
       >
-        <View>
-          <Text
-            style={[styles.shopTitle, { color: isDark ? textColor : "#FFF" }]}
-          >
-            {user?.shopName || "Vegetable Shop"}
-          </Text>
-          <Text
-            style={[
-              styles.shopSubtitle,
-              { color: isDark ? labelColor : "rgba(255,255,255,0.85)" },
-            ]}
-          >
-            Point of Sale
-          </Text>
-        </View>
-        <View style={styles.headerActions}>
-          <TouchableOpacity
-            style={[
-              styles.headerIconBtn,
-              { backgroundColor: isDark ? "#333" : "rgba(255,255,255,0.2)" },
-            ]}
-            onPress={() => router.push("/shop/history")}
-          >
-            <MaterialCommunityIcons
-              name="history"
-              size={22}
-              color={isDark ? textColor : "#FFF"}
-            />
-          </TouchableOpacity>
+        <View style={styles.headerTitleRow}>
+          <View>
+            <Text
+              style={[styles.shopTitle, { color: isDark ? textColor : "#FFF" }]}
+            >
+              {shopName || user?.shopName || "Vegetable Shop"}
+            </Text>
+            <View style={styles.headerSubtitleRow}>
+              <View style={[styles.statusDotHeader, { backgroundColor: isPrinterConnected ? '#FFB347' : '#F87171' }]} />
+              <Text
+                style={[
+                  styles.shopSubtitle,
+                  { color: isDark ? labelColor : "rgba(255,255,255,0.9)" },
+                ]}
+              >
+                {language === 'Tamil' ? 'பாயிண்ட் ஆஃப் சேல்' : 'Point of Sale'} • {isWholesale ? (language === 'Tamil' ? 'மொத்த விற்பனை' : 'Wholesale') : (language === 'Tamil' ? 'சில்லறை' : 'Retail')}
+              </Text>
+            </View>
+          </View>
 
-          <TouchableOpacity
-            style={[
-              styles.headerIconBtn,
-              { backgroundColor: isDark ? "#333" : "rgba(255,255,255,0.2)" },
-            ]}
-            onPress={() => setSettingsMenuVisible(!settingsMenuVisible)}
-          >
-            <Ionicons
-              name="settings-outline"
-              size={22}
-              color={isDark ? textColor : "#FFF"}
-            />
-          </TouchableOpacity>
         </View>
       </LinearGradient>
 
@@ -1200,7 +1457,7 @@ export default function ShopScreen() {
 
       {/* Bottom Floating Bar */}
       {cart.length > 0 && (
-        <Animated.View entering={SlideInUp} style={styles.floatBarContainer}>
+        <View style={styles.floatBarContainer}>
           <View
             style={[
               styles.floatBar,
@@ -1235,7 +1492,7 @@ export default function ShopScreen() {
               <Feather name="arrow-right" size={20} color="#FFF" />
             </TouchableOpacity>
           </View>
-        </Animated.View>
+        </View>
       )}
 
       {/* Manual Entry Modal */}
@@ -1301,7 +1558,7 @@ export default function ShopScreen() {
 
                   <View style={styles.inputField}>
                     <View style={styles.inputHeader}>
-                      <Feather name="dollar-sign" size={16} color={primaryColor} />
+                      <MaterialCommunityIcons name="currency-inr" size={16} color={primaryColor} />
                       <Text style={[styles.inputLabel, { color: labelColor }]}>
                         Price per kg
                       </Text>
@@ -1365,6 +1622,49 @@ export default function ShopScreen() {
         </TouchableWithoutFeedback>
       </Modal>
 
+      {/* Printer Selection Modal */}
+      <Modal visible={showPrinterModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+            <View style={[styles.printerModal, { backgroundColor: cardBg }]}>
+                <View style={styles.modalHeader}>
+                    <Text style={[styles.modalTitle, { color: textColor }]}>Select Bluetooth Printer</Text>
+                    <TouchableOpacity onPress={() => setShowPrinterModal(false)}>
+                        <Ionicons name="close" size={24} color={textColor} />
+                    </TouchableOpacity>
+                </View>
+                
+                <FlatList
+                    data={pairedDevices}
+                    keyExtractor={item => item.address}
+                    renderItem={({ item }) => (
+                        <TouchableOpacity 
+                            onPress={() => handleConnectPrinter(item.address)}
+                            style={[styles.deviceRow, { borderBottomColor: borderCol }]}
+                        >
+                            <View>
+                                <Text style={[styles.deviceName, { color: textColor }]}>{item.name || 'Unknown'}</Text>
+                                <Text style={{ color: labelColor, fontSize: 10 }}>{item.address}</Text>
+                            </View>
+                            <MaterialCommunityIcons name="bluetooth" size={20} color={primaryColor} />
+                        </TouchableOpacity>
+                    )}
+                    ListEmptyComponent={
+                        <View style={{ padding: 20, alignItems: 'center' }}>
+                            <Text style={{ color: labelColor }}>{isScanning ? 'Scanning...' : 'No paired printers found'}</Text>
+                        </View>
+                    }
+                />
+                
+                <TouchableOpacity 
+                    onPress={scanPrinters} 
+                    style={[styles.modalActionBtn, { backgroundColor: primaryColor }]}
+                >
+                    <Text style={{ color: '#FFF', fontWeight: 'bold' }}>Refresh List</Text>
+                </TouchableOpacity>
+            </View>
+        </View>
+      </Modal>
+
       {/* Bill Invoice Preview Modal */}
       <Modal
         visible={billPreviewVisible}
@@ -1378,7 +1678,7 @@ export default function ShopScreen() {
             colors={isDark ? ["#1A1A1A", "#1A1A1A"] : ["#FF8C00", "#FF8C00"]}
             style={[
               styles.fixedHeader,
-              { paddingTop: insets.top + (Platform.OS === 'android' ? 15 : 10) }
+              { paddingTop: insets.top + (Platform.OS === 'android' ? 5 : 2) }
             ]}
           >
             <View style={styles.invoiceHeaderNav}>
@@ -1392,58 +1692,55 @@ export default function ShopScreen() {
                 <Text style={styles.invoiceHeaderTitle}>
                   {language === 'Tamil' ? 'பில் முன்னோட்டம்' : 'Invoice Preview'}
                 </Text>
-                <View style={styles.headerStatusBadge}>
-                  <View style={styles.statusDot} />
-                  <Text style={styles.statusText}>{language === 'Tamil' ? 'தயாராக உள்ளது' : 'Ready to Generate'}</Text>
-                </View>
               </View>
               <View style={{ width: scale(36) }} />
             </View>
           </LinearGradient>
 
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ flexGrow: 1 }}
-          >
+            {/* Invisible but active capture component - placed outside scroll for better results */}
+            <View 
+              pointerEvents="none"
+              style={{ 
+                position: 'absolute', 
+                top: 0, 
+                left: 0, 
+                opacity: 0.05, 
+                zIndex: -100, 
+                width: 400,
+              }} 
+            >
+              <ThermalReceiptView 
+                 name={customerName}
+                 mobile={customerMobile}
+                 billId={nextBillId}
+                 date={new Date().toLocaleString('en-IN')}
+                 cart={cart}
+                 total={cartTotal}
+                 disc={discount}
+                 shopName={user?.shopName}
+                 shopPhone={user?.phone}
+              />
+            </View>
+
+            <ScrollView
+              ref={scrollRef}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ flexGrow: 1 }}
+            >
+            
+            <ViewShot ref={viewShotRef} options={{ format: "jpg", quality: 0.9 }} style={{ backgroundColor: bg }}>
             {/* ── HERO BANNER (Dashboard Style) ── */}
             <LinearGradient
-              colors={isDark ? ['#1A1A1A', '#121212'] : ['#FF8C00', '#FF7F50']}
+              colors={isDark ? ['#1A1A1A', '#1A1A1A'] : [primaryColor, primaryColor]}
               style={styles.hero}
             >
-              <View style={[styles.decor1, { opacity: isDark ? 0.03 : 0.1 }]} />
-              <View style={[styles.decor2, { opacity: isDark ? 0.02 : 0.08 }]} />
-
-              <Animated.View entering={FadeInDown.delay(100).duration(500)}>
-                <LinearGradient
-                  colors={isDark ? ['#252525', '#1E1E1E'] : ['rgba(255,255,255,0.25)', 'rgba(255,255,255,0.15)']}
-                  style={styles.revenueBanner}
-                >
-                  <View style={styles.revenueItem}>
-                    <Text style={[styles.revenueLabel, { color: isDark ? labelColor : 'rgba(255,255,255,0.8)' }]}>
-                      {language === 'Tamil' ? 'மொத்த தொகை' : 'Grand Total'}
-                    </Text>
-                    <Text style={[styles.revenueValue, { color: '#FFF' }]}>
-                      ₹{(cartTotal - (parseFloat(discount.toString()) || 0)).toFixed(0)}
-                    </Text>
-                  </View>
-                  <View style={[styles.revenueDivider, { backgroundColor: isDark ? borderCol : 'rgba(255,255,255,0.3)' }]} />
-                  <View style={styles.revenueItem}>
-                    <Text style={[styles.revenueLabel, { color: isDark ? labelColor : 'rgba(255,255,255,0.8)' }]}>
-                      {language === 'Tamil' ? 'தள்ளுபடி (Extra)' : 'Discount'}
-                    </Text>
-                    <View style={styles.discountInputWrapper}>
-                      <Text style={{ color: '#FFF', fontWeight: '900', fontSize: 18 }}>₹</Text>
-                      <TextInput
-                        keyboardType="numeric"
-                        style={styles.dashboardDiscountInput}
-                        value={discount.toString()}
-                        selectTextOnFocus
-                        onChangeText={(v) => setDiscount(parseFloat(v) || 0)}
-                      />
-                    </View>
-                  </View>
-                </LinearGradient>
-              </Animated.View>
+              <View style={styles.heroContent}>
+                <View style={styles.heroMain}>
+                   <Text style={styles.heroTitle}>{language === 'Tamil' ? 'பில் விவரம்' : 'Invoice Details'}</Text>
+                   <Text style={[styles.heroSubtitle, { color: 'rgba(255,255,255,0.9)' }]}>#{nextBillId} • {new Date().toLocaleDateString('en-IN')}</Text>
+                </View>
+                 <View style={{ width: 0 }} />
+              </View>
             </LinearGradient>
 
             <View style={styles.body}>
@@ -1458,8 +1755,8 @@ export default function ShopScreen() {
                 </View>
 
                 <View style={[styles.quickStatCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
-                  <View style={[styles.quickStatIcon, { backgroundColor: '#10B98115' }]}>
-                    <MaterialCommunityIcons name="calendar" size={20} color="#10B981" />
+                  <View style={[styles.quickStatIcon, { backgroundColor: '#FF8C0015' }]}>
+                    <MaterialCommunityIcons name="calendar" size={20} color="#FF8C00" />
                   </View>
                   <Text style={[styles.quickStatValue, { color: textColor, fontSize: 16 }]}>{new Date().toLocaleDateString('en-IN')}</Text>
                   <Text style={[styles.quickStatLabel, { color: labelColor }]}>{language === 'Tamil' ? 'தேதி' : 'Date'}</Text>
@@ -1477,23 +1774,29 @@ export default function ShopScreen() {
               {/* ── CUSTOMER INFO ── */}
               <Animated.View entering={FadeInDown.delay(300)}>
                 <Text style={[styles.sectionTitle, { color: textColor }]}>{language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Customer'}</Text>
-                <View style={[styles.dashboardInvoiceCard, { backgroundColor: cardBg, borderColor: borderCol, padding: scale(15) }]}>
-                  <View style={[styles.dashboardIconBox, { backgroundColor: '#3B82F615' }]}>
-                    <MaterialCommunityIcons name="account" size={24} color="#3B82F6" />
-                  </View>
+                <View style={[styles.dashboardInvoiceCard, { backgroundColor: cardBg, borderColor: borderCol, padding: scale(10), marginBottom: 5 }]}>
                   <View style={{ flex: 1 }}>
-                    <TextInput
-                      style={[styles.dashboardCustomerInput, { color: textColor }]}
-                      placeholder={language === 'Tamil' ? "வாடிக்கையாளர் பெயரை உள்ளிடவும்" : "Enter Customer Name"}
-                      placeholderTextColor={labelColor}
-                      value={customerName}
-                      onChangeText={setCustomerName}
-                    />
-                    <View style={{ height: 1.5, backgroundColor: borderCol, marginVertical: moderateScale(10), opacity: 0.5 }} />
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <MaterialCommunityIcons name="account-outline" size={18} color={primaryColor} style={{ marginRight: 8 }} />
+                        <TextInput
+                        style={[styles.dashboardCustomerInput, { color: textColor, flex: 1, fontSize: moderateScale(14) }]}
+                        placeholder={language === 'Tamil' ? "வாடிக்கையாளர் பெயரை உள்ளிடவும்" : "Enter Customer Name"}
+                        placeholderTextColor={labelColor}
+                        value={customerName}
+                        onChangeText={setCustomerName}
+                        />
+                        <TouchableOpacity 
+                            onPress={handlePickContact}
+                            style={[styles.contactPickerBtn, { backgroundColor: primaryColor + '10', padding: 4, borderRadius: 6 }]}
+                        >
+                            <Feather name="users" size={16} color={primaryColor} />
+                        </TouchableOpacity>
+                    </View>
+                    <View style={{ height: 1, backgroundColor: borderCol, marginVertical: moderateScale(8), opacity: 0.3 }} />
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <MaterialCommunityIcons name="whatsapp" size={18} color="#25D366" style={{ marginRight: 8 }} />
+                      <MaterialCommunityIcons name="whatsapp" size={16} color="#25D366" style={{ marginRight: 8 }} />
                       <TextInput
-                        style={[styles.dashboardCustomerInput, { color: textColor, paddingVertical: 5 }]}
+                        style={[styles.dashboardCustomerInput, { color: textColor, paddingVertical: 2, fontSize: moderateScale(14), flex: 1 }]}
                         placeholder={language === 'Tamil' ? "வாடிக்கையாளர் மொபைல் எண்" : "Customer Mobile Number"}
                         placeholderTextColor={labelColor}
                         keyboardType="phone-pad"
@@ -1503,27 +1806,33 @@ export default function ShopScreen() {
                       />
                     </View>
                   </View>
-                  <Ionicons name="pencil" size={16} color={labelColor} />
                 </View>
               </Animated.View>
 
               {/* ── ITEMS LIST ── */}
               <Animated.View entering={FadeInDown.delay(400)} style={{ marginTop: 10 }}>
-                <View style={[styles.sectionRow, { marginBottom: 10 }]}>
-                    <Text style={[styles.sectionTitle, { color: textColor, marginBottom: 0 }]}>{language === 'Tamil' ? 'பொருட்கள் விவரம்' : 'Bill Items'}</Text>
-                    <Text style={{ color: labelColor, fontWeight: '700' }}>{language === 'Tamil' ? 'விலை திருத்தலாம்' : 'Editable'}</Text>
+                <View style={[styles.sectionRow, { marginBottom: 8 }]}>
+                    <Text style={[styles.sectionTitle, { color: textColor, marginBottom: 0, fontSize: moderateScale(16) }]}>{language === 'Tamil' ? 'பொருட்கள் விவரம்' : 'Bill Items'}</Text>
+                    <Text style={{ color: labelColor, fontWeight: '700', fontSize: 10 }}>{language === 'Tamil' ? 'விலை திருத்தலாம்' : 'Editable'}</Text>
+                </View>
+
+                {/* Column Headers */}
+                <View style={{ flexDirection: 'row', paddingHorizontal: scale(14), marginBottom: 5 }}>
+                    <Text style={{ flex: 2.2, color: labelColor, fontSize: 10, fontWeight: '800' }}>{language === 'Tamil' ? 'பொருள்/விலை' : 'ITEM / PRICE'}</Text>
+                    <Text style={{ flex: 2, color: labelColor, fontSize: 10, fontWeight: '800', textAlign: 'center' }}>{language === 'Tamil' ? 'அளவு' : 'QUANTITY'}</Text>
+                    <Text style={{ flex: 1.5, color: labelColor, fontSize: 10, fontWeight: '800', textAlign: 'right' }}>{language === 'Tamil' ? 'மொத்தம்' : 'TOTAL'}</Text>
                 </View>
 
                 {cart.map((item, index) => (
                   <Animated.View
                     key={item.id}
                     entering={FadeInDown.delay(450 + index * 50)}
-                    style={[styles.dashboardInvoiceCard, { backgroundColor: cardBg, borderColor: borderCol, paddingVertical: verticalScale(12) }]}
+                    style={[styles.dashboardInvoiceCard, { backgroundColor: cardBg, borderColor: borderCol, paddingVertical: verticalScale(8), marginBottom: 6, borderRadius: 12 }]}
                   >
-                    <View style={{ flex: 2 }}>
-                      <Text style={[styles.trTamil, { color: textColor, fontSize: moderateScale(16) }]} numberOfLines={1}>{item.tamilName}</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                        <Text style={{ fontSize: 11, color: labelColor, fontWeight: '700' }}>₹</Text>
+                    <View style={{ flex: 2.2 }}>
+                      <Text style={[styles.trTamil, { color: textColor, fontSize: moderateScale(15) }]} numberOfLines={1}>{item.tamilName}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                        <Text style={{ fontSize: 10, color: labelColor, fontWeight: '800' }}>₹</Text>
                         <TextInput
                           keyboardType="numeric"
                           style={[
@@ -1531,30 +1840,30 @@ export default function ShopScreen() {
                             { 
                               color: primaryColor, 
                               backgroundColor: isDark ? '#333' : '#F3F4F6',
-                              width: scale(55),
-                              height: verticalScale(26),
-                              fontSize: moderateScale(12),
-                              marginHorizontal: 4,
-                              borderRadius: 6
+                              width: scale(45),
+                              height: verticalScale(22),
+                              fontSize: moderateScale(11),
+                              marginHorizontal: 3,
+                              borderRadius: 4
                             }
                           ]}
                           value={item.price.toString()}
                           selectTextOnFocus
                           onChangeText={(v) => updateCartItemInPreview(item.id, item.quantity.toString(), v, (item.itemDiscount || 0).toString())}
                         />
-                        <Text style={{ fontSize: 11, color: labelColor, fontWeight: '700' }}>/kg</Text>
+                        <Text style={{ fontSize: 10, color: labelColor, fontWeight: '800' }}>/kg</Text>
                       </View>
                     </View>
                     
-                    <View style={{ flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                    <View style={{ flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
                        <TouchableOpacity 
                          onPress={() => adjustQtyInPreview(item.id, -0.25)}
-                         style={[styles.previewStepBtn, { backgroundColor: isDark ? '#333' : '#F8FAFC', borderWidth: 1, borderColor: borderCol }]}
+                         style={[styles.previewStepBtn, { backgroundColor: isDark ? '#333' : '#F8FAFC', width: scale(24), height: scale(24) }]}
                        >
-                         <Feather name="minus" size={14} color={textColor} />
+                         <Feather name="minus" size={12} color={textColor} />
                        </TouchableOpacity>
                        
-                       <View style={{ alignItems: 'center', minWidth: scale(50) }}>
+                       <View style={{ alignItems: 'center', minWidth: scale(45) }}>
                          <TextInput
                             keyboardType="numeric"
                             style={[
@@ -1562,33 +1871,32 @@ export default function ShopScreen() {
                               { 
                                 color: textColor, 
                                 backgroundColor: isDark ? '#333' : '#F3F4F6',
-                                width: scale(50),
-                                height: verticalScale(30),
-                                fontSize: moderateScale(14)
+                                width: scale(42),
+                                height: verticalScale(26),
+                                fontSize: moderateScale(12)
                               }
                             ]}
                             value={item.quantity.toString()}
                             selectTextOnFocus
                             onChangeText={(v) => updateCartItemInPreview(item.id, v, item.price.toString(), (item.itemDiscount || 0).toString())}
                           />
-                          <Text style={{ fontSize: 9, fontWeight: '800', color: labelColor, marginTop: 2 }}>KG</Text>
                        </View>
 
                        <TouchableOpacity 
                          onPress={() => adjustQtyInPreview(item.id, 0.25)}
-                         style={[styles.previewStepBtn, { backgroundColor: primaryColor }]}
+                         style={[styles.previewStepBtn, { backgroundColor: primaryColor, width: scale(24), height: scale(24) }]}
                        >
-                         <Feather name="plus" size={14} color="#FFF" />
+                         <Feather name="plus" size={12} color="#FFF" />
                        </TouchableOpacity>
                     </View>
 
                     <View style={{ flex: 1.5, alignItems: 'flex-end', justifyContent: 'center' }}>
-                      <Text style={[styles.trTotal, { color: primaryColor, fontSize: moderateScale(18) }]}>₹{item.total.toFixed(0)}</Text>
+                      <Text style={[styles.trTotal, { color: primaryColor, fontSize: moderateScale(16) }]}>₹{item.total.toFixed(0)}</Text>
                       <TouchableOpacity 
                         onPress={() => removeItemFromPreview(item.id)}
-                        style={{ marginTop: verticalScale(8), padding: 4 }}
+                        style={{ marginTop: verticalScale(4), padding: 2 }}
                       >
-                         <Feather name="trash-2" size={18} color="#EF4444" />
+                         <Feather name="trash-2" size={14} color="#EF4444" />
                       </TouchableOpacity>
                     </View>
                   </Animated.View>
@@ -1607,103 +1915,139 @@ export default function ShopScreen() {
               </Animated.View>
 
               {/* ── FINAL BREAKDOWN CARD ── */}
-              <Animated.View entering={FadeInDown.delay(550)} style={{ marginTop: 20 }}>
-                <View style={[styles.premiumCard, { backgroundColor: cardBg, padding: scale(20) }]}>
-                  <View style={styles.cardHeader}>
-                    <View style={styles.headerIndicator} />
-                    <Text style={[styles.cardTitle, { color: textColor }]}>{language === 'Tamil' ? 'பண விவரம்' : 'Payment Summary'}</Text>
+              <Animated.View entering={FadeInDown.delay(550)} style={{ marginTop: 10 }}>
+                <View style={[styles.premiumCard, { backgroundColor: cardBg, padding: scale(15) }]}>
+                  <View style={[styles.summaryLine, { marginBottom: 6 }]}>
+                    <Text style={[styles.summaryLabelText, { color: labelColor, fontSize: 13 }]}>{language === 'Tamil' ? 'உருப்படிகளின் விலை' : 'Items Total'}</Text>
+                    <Text style={[styles.summaryValueText, { color: textColor, fontSize: 13 }]}>₹{cartTotal.toFixed(2)}</Text>
                   </View>
                   
-                  <View style={styles.summaryLine}>
-                    <Text style={[styles.summaryLabelText, { color: labelColor }]}>{language === 'Tamil' ? 'உருப்படிகளின் விலை' : 'Items Total'}</Text>
-                    <Text style={[styles.summaryValueText, { color: textColor }]}>₹{cartTotal.toFixed(2)}</Text>
-                  </View>
-                  
-                  <View style={[styles.summaryLine, { marginTop: 10 }]}>
-                    <Text style={[styles.summaryLabelText, { color: '#EF4444' }]}>{language === 'Tamil' ? 'கூடுதல் தள்ளுபடி' : 'Extra Discount'}</Text>
-                    <Text style={[styles.summaryValueText, { color: '#EF4444' }]}>- ₹{(parseFloat(discount.toString()) || 0).toFixed(2)}</Text>
+                  <View style={[styles.summaryLine]}>
+                    <Text style={[styles.summaryLabelText, { color: '#EF4444', fontSize: 13 }]}>{language === 'Tamil' ? 'கூடுதல் தள்ளுபடி' : 'Extra Discount'}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                       <Text style={{ color: '#EF4444', fontWeight: 'bold', fontSize: 13 }}>- ₹</Text>
+                       <TextInput
+                         style={[styles.summaryValueText, { color: '#EF4444', minWidth: 50, textAlign: 'right', borderBottomWidth: 1, borderBottomColor: '#EF4444', padding: 0, fontSize: 13 }]}
+                         keyboardType="numeric"
+                         value={discount.toString()}
+                         onChangeText={(v) => {
+                           const val = parseFloat(v) || 0;
+                           setDiscount(val);
+                         }}
+                         selectTextOnFocus
+                       />
+                    </View>
                   </View>
 
-                  <View style={[styles.divider, { backgroundColor: borderCol, marginVertical: 15 }]} />
+                  <View style={[styles.divider, { backgroundColor: borderCol, marginVertical: 10 }]} />
 
                   <View style={styles.summaryLine}>
-                    <Text style={[styles.summaryLabelText, { color: textColor, fontSize: 18, fontWeight: '900' }]}>{language === 'Tamil' ? 'மொத்த தொகை' : 'Grand Total'}</Text>
-                    <Text style={[styles.summaryValueText, { color: primaryColor, fontSize: 22, fontWeight: '900' }]}>₹{(cartTotal - (parseFloat(discount.toString()) || 0)).toFixed(0)}</Text>
+                    <Text style={[styles.summaryLabelText, { color: textColor, fontSize: 16, fontWeight: '900' }]}>{language === 'Tamil' ? 'மொத்த தொகை' : 'Grand Total'}</Text>
+                    <Text style={[styles.summaryValueText, { color: primaryColor, fontSize: 20, fontWeight: '900' }]}>₹{(cartTotal - (parseFloat(discount.toString()) || 0)).toFixed(0)}</Text>
                   </View>
                 </View>
               </Animated.View>
 
 
               {/* ── SHOP FOOTER BRANDING ── */}
-              <View style={styles.invoiceFooterBranding}>
+              <View style={[styles.invoiceFooterBranding, { marginTop: 10, paddingBottom: 10 }]}>
                 <Image
                   source={require("../../src/assets/images/icon.png")}
-                  style={styles.footerLogo}
+                  style={[styles.footerLogo, { width: 30, height: 30 }]}
                 />
-                <Text style={[styles.footerShopName, { color: textColor }]}>{user?.shopName || "SUJI VEGETABLES"}</Text>
-                <Text style={[styles.footerShopLoc, { color: labelColor }]}>
+                <Text style={[styles.footerShopName, { color: textColor, fontSize: 14 }]}>
+                  {language === 'Tamil' ? 'சுஜி காய்கறி கடை' : 'SUJI VEGETABLES SHOP'}
+                </Text>
+                <Text style={[styles.footerShopLoc, { color: labelColor, fontSize: 10 }]}>
                   {language === 'Tamil' ? 'பாண்டி - திண்டிவனம் மெயின் ரோடு, கிளியனூர்.' : 'Pondy - Tindivanam Road, Kiliyanur'}
                 </Text>
-                <Text style={[styles.footerShopContact, { color: labelColor }]}>Ph: +91 9095938085</Text>
+                <Text style={[styles.footerShopContact, { color: labelColor, fontSize: 10 }]}>{user?.phone || "95856 50734"}</Text>
               </View>
             </View>
 
-            <View style={{ height: 120 }} />
+            </ViewShot>
+
+            {/* Sticky Professional Footer Actions - Moved inside ScrollView but outside ViewShot */}
+            <Animated.View 
+              entering={FadeInDown.delay(600)}
+              style={[
+                styles.stickyInvoiceFooter, 
+                { 
+                  backgroundColor: cardBg, 
+                  borderTopColor: borderCol,
+                  paddingBottom: verticalScale(20),
+                  flexDirection: 'row',
+                  gap: 12,
+                  paddingHorizontal: 16,
+                  marginTop: 20
+                }
+              ]}
+            >
+                <TouchableOpacity 
+                  style={[
+                    styles.mainGenerateBtn, 
+                    { 
+                      backgroundColor: '#25D366', 
+                      flex: 0.6, 
+                      elevation: 4,
+                      shadowColor: '#000',
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: 0.2,
+                      shadowRadius: 4,
+                      paddingHorizontal: 8
+                    }
+                  ]} 
+                  onPress={handleShareImage}
+                  activeOpacity={0.8}
+                >
+                    <View style={styles.generateBtnContent}>
+                      <Ionicons name="logo-whatsapp" size={20} color="#FFF" />
+                      <Text style={[styles.mainGenerateText, { fontWeight: '700', fontSize: 13 }]}>Share Bill</Text>
+                    </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={[
+                    styles.mainGenerateBtn, 
+                    { 
+                      backgroundColor: primaryColor, 
+                      flex: 1.4, 
+                      elevation: 4,
+                      shadowColor: '#000',
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: 0.2,
+                      shadowRadius: 4,
+                      paddingHorizontal: 15
+                    }
+                  ]} 
+                  onPress={finalizeBill}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.generateBtnContent}>
+                    <MaterialCommunityIcons name="printer-check" size={24} color="#FFF" />
+                    <Text style={[styles.mainGenerateText, { fontSize: moderateScale(14) }]}>
+                      {language === 'Tamil' ? `அச்சிடு (${printerPreference === '2inch' ? '2"' : '3"'})` : `Print (${printerPreference === '2inch' ? '2"' : '3"'})`}
+                    </Text>
+                  </View>
+                  <View style={[styles.printerSwitchInline, { backgroundColor: 'rgba(255,255,255,0.2)', marginHorizontal: 5 }]}>
+                     <TouchableOpacity 
+                       onPress={(e) => {
+                         e.stopPropagation();
+                         const newSize = printerPreference === '2inch' ? '3inch' : '2inch';
+                         setPrinterPreference(newSize);
+                         Storage.setItem(KEYS.PRINTER_SIZE, newSize);
+                       }}
+                       style={styles.switchIcon}
+                     >
+                       <MaterialCommunityIcons name="swap-horizontal" size={18} color="#FFF" />
+                     </TouchableOpacity>
+                  </View>
+                  <View style={styles.generateBtnArrow}>
+                    <Feather name="arrow-right" size={20} color="#FFF" />
+                  </View>
+                </TouchableOpacity>
+            </Animated.View>
           </ScrollView>
-
-          {/* Sticky Professional Footer Actions */}
-          <Animated.View 
-            entering={SlideInUp.delay(600)}
-            style={[
-              styles.stickyInvoiceFooter, 
-              { 
-                backgroundColor: cardBg, 
-                borderTopColor: borderCol,
-                paddingBottom: insets.bottom > 0 ? insets.bottom : verticalScale(15),
-                flexDirection: 'row',
-                gap: 12,
-                paddingHorizontal: 16
-              }
-            ]}
-          >
-              <TouchableOpacity 
-                style={[styles.mainGenerateBtn, { backgroundColor: '#25D366', flex: 0.4 }]} 
-                onPress={handleWhatsAppShare}
-                activeOpacity={0.8}
-              >
-                  <MaterialCommunityIcons name="whatsapp" size={24} color="#FFF" />
-                  <Text style={[styles.mainGenerateText, { marginLeft: 8 }]}>Share</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={[styles.mainGenerateBtn, { backgroundColor: primaryColor, flex: 1, paddingHorizontal: 10 }]} 
-                onPress={finalizeBill}
-                activeOpacity={0.8}
-              >
-                <View style={styles.generateBtnContent}>
-                  <MaterialCommunityIcons name="printer-check" size={24} color="#FFF" />
-                  <Text style={[styles.mainGenerateText, { fontSize: moderateScale(14) }]}>
-                    {language === 'Tamil' ? `அச்சிடு (${printerPreference === '2inch' ? '2"' : '3"'})` : `Print (${printerPreference === '2inch' ? '2"' : '3"'})`}
-                  </Text>
-                </View>
-                <View style={[styles.printerSwitchInline, { backgroundColor: 'rgba(255,255,255,0.2)', marginHorizontal: 5 }]}>
-                   <TouchableOpacity 
-                     onPress={(e) => {
-                       e.stopPropagation();
-                       const newSize = printerPreference === '2inch' ? '3inch' : '2inch';
-                       setPrinterPreference(newSize);
-                       Storage.setItem(KEYS.PRINTER_SIZE, newSize);
-                     }}
-                     style={styles.switchIcon}
-                   >
-                     <MaterialCommunityIcons name="swap-horizontal" size={18} color="#FFF" />
-                   </TouchableOpacity>
-                </View>
-                <View style={styles.generateBtnArrow}>
-                  <Feather name="arrow-right" size={20} color="#FFF" />
-                </View>
-              </TouchableOpacity>
-          </Animated.View>
         </SafeAreaView>
       </Modal>
     </View>
@@ -1715,39 +2059,57 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: scale(20),
-    paddingBottom: verticalScale(12),
+    paddingHorizontal: scale(25),
+    paddingBottom: verticalScale(25),
+    borderBottomLeftRadius: scale(30),
+    borderBottomRightRadius: scale(30),
+    overflow: 'hidden',
+    elevation: 8,
+    shadowColor: '#FF8C00',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
     zIndex: 10,
   },
+  headerTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+  },
   shopTitle: {
-    fontSize: moderateScale(22),
+    fontSize: moderateScale(24),
     fontWeight: "900",
-    letterSpacing: 0.5,
+    letterSpacing: -0.5,
+  },
+  headerSubtitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: verticalScale(4),
+  },
+  statusDotHeader: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 6,
   },
   shopSubtitle: {
-    fontSize: moderateScale(13),
-    marginTop: verticalScale(2),
-    fontWeight: "600",
-    textTransform: "capitalize",
+    fontSize: moderateScale(12),
+    fontWeight: "700",
+    letterSpacing: 0.3,
   },
   headerActions: {
     flexDirection: "row",
     gap: scale(10),
   },
   headerIconBtn: {
-    width: scale(40),
-    height: scale(40),
-    borderRadius: scale(14),
+    width: scale(42),
+    height: scale(42),
+    borderRadius: scale(15),
     alignItems: "center",
     justifyContent: "center",
-    elevation: 2,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    backdropFilter: 'blur(10px)',
   },
   // Settings Menu
   menuOverlay: {
@@ -1792,16 +2154,16 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(15),
   },
   searchBar: {
-    height: verticalScale(50),
-    borderRadius: scale(16),
+    height: verticalScale(40),
+    borderRadius: scale(12),
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: scale(15),
+    paddingHorizontal: scale(12),
     elevation: 1,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.03,
-    shadowRadius: 5,
+    shadowRadius: 3,
   },
   searchInput: {
     flex: 1,
@@ -1812,20 +2174,20 @@ const styles = StyleSheet.create({
   // Card
   card: {
     flex: 1,
-    borderRadius: scale(18),
-    padding: scale(14),
-    elevation: 2,
+    borderRadius: scale(12),
+    padding: scale(10),
+    elevation: 1,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
-    shadowRadius: 6,
-    marginBottom: scale(8),
+    shadowRadius: 4,
+    marginBottom: scale(6),
   },
   cardInfoImage: {
     width: "100%",
-    height: verticalScale(90),
+    height: verticalScale(70),
     resizeMode: "contain",
-    marginBottom: verticalScale(10),
+    marginBottom: verticalScale(6),
   },
   checkBadge: {
     position: "absolute",
@@ -1834,20 +2196,48 @@ const styles = StyleSheet.create({
     width: scale(22),
     height: scale(22),
     borderRadius: scale(11),
-    backgroundColor: "#00A86B",
+    backgroundColor: "#FF8C00",
     zIndex: 10,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
     borderColor: "#FFF",
   },
+  favouriteBtn: {
+    position: "absolute",
+    top: scale(8),
+    left: scale(8),
+    width: scale(26),
+    height: scale(26),
+    borderRadius: scale(13),
+    zIndex: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  favouriteBtnList: {
+    position: "absolute",
+    top: scale(4),
+    left: scale(4),
+    width: scale(22),
+    height: scale(22),
+    borderRadius: scale(11),
+    zIndex: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 1,
+  },
   cardDetails: {
     flex: 1,
   },
   cardTamilName: {
-    fontSize: moderateScale(15),
+    fontSize: moderateScale(13),
     fontWeight: "800",
-    marginBottom: verticalScale(2),
+    marginBottom: verticalScale(1),
   },
   cardEngName: {
     fontSize: moderateScale(11),
@@ -1861,7 +2251,7 @@ const styles = StyleSheet.create({
     marginTop: verticalScale(5),
   },
   priceText: {
-    fontSize: moderateScale(16),
+    fontSize: moderateScale(14),
     fontWeight: "800",
   },
   unitText: {
@@ -1870,9 +2260,9 @@ const styles = StyleSheet.create({
     marginLeft: scale(2),
   },
   addBtn: {
-    width: scale(34),
-    height: scale(34),
-    borderRadius: scale(12),
+    width: scale(30),
+    height: scale(30),
+    borderRadius: scale(10),
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1880,9 +2270,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    borderRadius: scale(12),
+    borderRadius: scale(10),
     padding: scale(2),
-    minHeight: scale(36),
+    minHeight: scale(32),
   },
   stepBtn: {
     width: moderateScale(32),
@@ -1893,10 +2283,10 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   stepVal: {
-    fontSize: moderateScale(15),
+    fontSize: moderateScale(13),
     fontWeight: "800",
-    marginHorizontal: scale(4),
-    minWidth: moderateScale(38),
+    marginHorizontal: scale(2),
+    minWidth: moderateScale(30),
     textAlign: "center",
   },
   // Controls
@@ -1947,36 +2337,36 @@ const styles = StyleSheet.create({
   // List Item
   listItem: {
     flexDirection: "row",
-    borderRadius: scale(16),
-    padding: scale(14),
-    marginBottom: scale(10),
+    borderRadius: scale(12),
+    padding: scale(10),
+    marginBottom: scale(8),
     alignItems: "center",
     elevation: 1,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.03,
-    shadowRadius: 4,
+    shadowRadius: 3,
   },
   listImage: {
-    width: scale(60),
-    height: scale(60),
+    width: scale(45),
+    height: scale(45),
     resizeMode: "contain",
-    marginRight: scale(15),
+    marginRight: scale(10),
   },
   listDetails: {
     flex: 1,
   },
   listTamilName: {
-    fontSize: moderateScale(16),
+    fontSize: moderateScale(14),
     fontWeight: "800",
-    marginBottom: verticalScale(4),
+    marginBottom: verticalScale(2),
   },
   listPriceRow: {
     flexDirection: "row",
     alignItems: "center",
   },
   listPriceText: {
-    fontSize: moderateScale(16),
+    fontSize: moderateScale(14),
     fontWeight: "800",
   },
   listUnitText: {
@@ -2003,16 +2393,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   catPill: {
-    paddingHorizontal: scale(16),
-    paddingVertical: verticalScale(8),
-    borderRadius: scale(20),
+    paddingHorizontal: scale(12),
+    paddingVertical: verticalScale(6),
+    borderRadius: scale(15),
     borderWidth: scale(1),
     justifyContent: "center",
     elevation: 1,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
-    shadowRadius: 3,
+    shadowRadius: 2,
   },
   catPillActive: {
     borderWidth: 0,
@@ -2029,23 +2419,24 @@ const styles = StyleSheet.create({
   // Bottom Bar
   floatBarContainer: {
     position: "absolute",
-    bottom: verticalScale(30),
-    left: scale(20),
-    right: scale(20),
+    bottom: 0,
+    left: 0,
+    right: 0,
     zIndex: 100,
   },
   floatBar: {
-    borderRadius: scale(20),
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     padding: scale(16),
     paddingHorizontal: scale(20),
-    elevation: 8,
-    shadowColor: "#FF8C00",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
+    elevation: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    borderTopLeftRadius: scale(24),
+    borderTopRightRadius: scale(24),
   },
   cartInfo: {
     flexDirection: "row",
@@ -2469,52 +2860,55 @@ const styles = StyleSheet.create({
   // Dashboard Style Invoice
   hero: {
     paddingHorizontal: scale(20),
-    paddingBottom: verticalScale(20),
+    paddingVertical: verticalScale(10),
+    borderBottomLeftRadius: scale(15),
+    borderBottomRightRadius: scale(15),
     overflow: 'hidden',
-    position: 'relative',
-    borderBottomLeftRadius: scale(24),
-    borderBottomRightRadius: scale(24),
+    marginBottom: verticalScale(4),
   },
-  decor1: {
-    position: 'absolute',
-    width: scale(250),
-    height: scale(250),
-    borderRadius: scale(125),
-    backgroundColor: '#FFF',
-    top: -scale(80),
-    right: -scale(60),
-  },
-  decor2: {
-    position: 'absolute',
-    width: scale(150),
-    height: scale(150),
-    borderRadius: scale(75),
-    backgroundColor: '#FFF',
-    bottom: -scale(40),
-    left: scale(20),
-  },
-  revenueBanner: {
+  heroContent: {
     flexDirection: 'row',
-    borderRadius: scale(20),
-    padding: scale(18),
-  },
-  revenueItem: {
-    flex: 1,
+    justifyContent: 'space-between',
     alignItems: 'center',
+    zIndex: 10,
   },
-  revenueLabel: {
-    fontSize: moderateScale(12),
-    fontWeight: '600',
-    marginBottom: 4,
+  heroMain: {
+    flex: 1,
   },
-  revenueValue: {
-    fontSize: moderateScale(26),
+  heroTitle: {
+    fontSize: moderateScale(18),
     fontWeight: '900',
+    color: '#FFF',
     letterSpacing: -0.5,
   },
-  revenueDivider: {
-    width: 1,
-    marginHorizontal: scale(10),
+  heroSubtitle: {
+    fontSize: moderateScale(11),
+    fontWeight: '600',
+    marginTop: 1,
+  },
+  heroStatusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: scale(10),
+    paddingVertical: verticalScale(5),
+    borderRadius: scale(10),
+  },
+  heroStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#4ADE80',
+    marginRight: 6,
+  },
+  heroStatusText: {
+    fontSize: moderateScale(10),
+    color: '#FFF',
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  body: {
+    paddingHorizontal: scale(16),
   },
   discountInputWrapper: {
     flexDirection: 'row',
@@ -2533,46 +2927,46 @@ const styles = StyleSheet.create({
   },
   body: {
     paddingHorizontal: scale(16),
-    paddingTop: verticalScale(20),
+    paddingTop: verticalScale(6),
   },
   quickStatsRow: {
     flexDirection: 'row',
     gap: scale(10),
-    marginBottom: verticalScale(24),
+    marginBottom: verticalScale(15),
   },
   quickStatCard: {
     flex: 1,
-    borderRadius: scale(18),
-    padding: scale(14),
+    borderRadius: scale(12),
+    padding: scale(8),
     alignItems: 'center',
     borderWidth: 1,
-    elevation: 2,
+    elevation: 1,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.02,
+    shadowRadius: 4,
   },
   quickStatIcon: {
-    width: scale(40),
-    height: scale(40),
-    borderRadius: scale(12),
+    width: scale(30),
+    height: scale(30),
+    borderRadius: scale(8),
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: verticalScale(8),
+    marginBottom: verticalScale(4),
   },
   quickStatValue: {
-    fontSize: moderateScale(18),
+    fontSize: moderateScale(14),
     fontWeight: '900',
-    marginBottom: 2,
+    marginBottom: 1,
   },
   quickStatLabel: {
-    fontSize: moderateScale(11),
+    fontSize: moderateScale(9),
     fontWeight: '600',
   },
   sectionTitle: {
-    fontSize: moderateScale(18),
+    fontSize: moderateScale(15),
     fontWeight: '800',
-    marginBottom: verticalScale(14),
+    marginBottom: verticalScale(8),
     letterSpacing: -0.3,
   },
   sectionRow: {
@@ -2671,7 +3065,7 @@ const styles = StyleSheet.create({
     borderRadius: scale(18),
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     paddingHorizontal: scale(20),
     elevation: 4,
     shadowColor: '#FF8C00',
@@ -2885,7 +3279,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     elevation: 4,
-    shadowColor: '#00A86B',
+    shadowColor: '#FF8C00',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -2910,7 +3304,7 @@ const styles = StyleSheet.create({
   paidText: {
     fontSize: moderateScale(10),
     fontWeight: '800',
-    color: '#10B981',
+    color: '#FF8C00',
   },
   invoiceFooterBranding: {
     alignItems: 'center',
@@ -2940,5 +3334,148 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(10),
     fontWeight: '700',
     marginTop: 4,
+  },
+  printerStatusHeader: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  printerModal: {
+    borderRadius: 20,
+    padding: 20,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  deviceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+  },
+  deviceName: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalActionBtn: {
+    marginTop: 20,
+    padding: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  contactPickerBtn: {
+    width: scale(36),
+    height: scale(36),
+    borderRadius: scale(10),
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: scale(10),
+  },
+  thermalCaptureContainer: {
+    width: 400, // Fixed width for consistent capture
+    backgroundColor: '#FFF',
+    padding: 20,
+  },
+  thermalContent: {
+    backgroundColor: '#FFF',
+  },
+  thermalShopName: {
+    fontSize: 28,
+    fontWeight: '900',
+    textAlign: 'center',
+    color: '#000',
+    marginBottom: 5,
+  },
+  thermalShopLoc: {
+    fontSize: 14,
+    color: '#000',
+    textAlign: 'center',
+    fontWeight: '600',
+    lineHeight: 18,
+  },
+  thermalShopContact: {
+    fontSize: 16,
+    color: '#000',
+    textAlign: 'center',
+    fontWeight: '700',
+    marginTop: 5,
+  },
+  thermalDivider: {
+    fontSize: 14,
+    color: '#000',
+    textAlign: 'center',
+    fontWeight: 'bold',
+    marginVertical: 10,
+  },
+  thermalRow: {
+    flexDirection: 'row',
+    marginBottom: 4,
+  },
+  thermalText: {
+    fontSize: 16,
+    color: '#000',
+    fontWeight: '600',
+  },
+  thermalHeader: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#000',
+  },
+  thermalItemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEE',
+  },
+  thermalItemName: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#000',
+  },
+  thermalItemSub: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '600',
+  },
+  thermalItemData: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#000',
+  },
+  thermalSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  thermalSummaryLabel: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#000',
+  },
+  thermalSummaryValue: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#000',
   },
 });

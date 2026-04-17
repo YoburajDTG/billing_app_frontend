@@ -14,6 +14,7 @@ type AuthContextType = {
     user: User | null;
     login: (userData: User, token: string) => Promise<void>;
     logout: () => Promise<void>;
+    updateUser: (updates: Partial<User>) => Promise<void>;
     isLoading: boolean;
 };
 
@@ -67,8 +68,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     };
 
+    const updateUser = async (updates: Partial<User>) => {
+        if (!user) return;
+        const updatedUser = { ...user, ...updates };
+        setUser(updatedUser);
+        await Storage.setItem(KEYS.USER_DATA, updatedUser);
+    };
+
     return (
-        <AuthContext.Provider value={{ user, login, logout, isLoading }}>
+        <AuthContext.Provider value={{ user, login, logout, updateUser, isLoading }}>
             {children}
         </AuthContext.Provider>
     );

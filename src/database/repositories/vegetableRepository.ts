@@ -15,6 +15,19 @@ export const vegetableRepository = {
         }
     },
 
+    async findByName(name: string, tamilName?: string): Promise<Vegetable | null> {
+        try {
+            const vegetable = await sqliteService.queryOne<Vegetable>(
+                `SELECT * FROM vegetables WHERE name = ? OR (tamil_name = ? AND tamil_name IS NOT NULL)`,
+                [name, tamilName || null]
+            );
+            return vegetable || null;
+        } catch (error) {
+            console.error('Error finding vegetable by name:', error);
+            return null;
+        }
+    },
+
     async getById(id: string): Promise<Vegetable | null> {
         try {
             const vegetable = await sqliteService.queryOne<Vegetable>(

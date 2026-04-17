@@ -11,8 +11,11 @@ import {
     TextInput,
     TouchableOpacity,
     View,
-    ActivityIndicator
+    ActivityIndicator,
+    Platform,
+    NativeModules
 } from 'react-native';
+import { ThermalPrinter } from '@/utils/thermalPrinter';
 import * as ImagePicker from 'expo-image-picker';
 import { useAppTheme } from '@/context/ThemeContext';
 import { KEYS, Storage } from '@/services/storage';
@@ -21,10 +24,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 
 export default function MerchantProfileScreen() {
-    const { isDark, language } = useAppTheme();
+    const { isDark, language, toggleTheme, toggleLanguage } = useAppTheme();
     const router = useRouter();
     const insets = useSafeAreaInsets();
     
+    const [merchantAddress, setMerchantAddress] = useState('');
+    const [printerStatus, setPrinterStatus] = useState(language === 'Tamil' ? 'இணைக்கப்படவில்லை' : 'Not Connected');
+    const [isPrinterConnected, setIsPrinterConnected] = useState(false);
     const [loading, setLoading] = useState(false);
     const [merchantName, setMerchantName] = useState('');
     const [merchantLogo, setMerchantLogo] = useState('');
@@ -39,21 +45,52 @@ export default function MerchantProfileScreen() {
     const loadProfile = async () => {
         setLoading(true);
         try {
-            const [mName, mLogo, mNumber, pSize] = await Promise.all([
+            const [mName, mLogo, mNumber, pSize, mAddr, lastPrinter] = await Promise.all([
                 Storage.getItem(KEYS.MERCHANT_NAME),
                 Storage.getItem(KEYS.MERCHANT_LOGO),
                 Storage.getItem(KEYS.MERCHANT_NUMBER),
-                Storage.getItem(KEYS.PRINTER_SIZE)
+                Storage.getItem(KEYS.PRINTER_SIZE),
+                Storage.getItem('merchant_address'),
+                Storage.getItem('last_printer')
             ]);
 
             if (mName) setMerchantName(mName);
             if (mLogo) setMerchantLogo(mLogo);
             if (mNumber) setMerchantNumber(mNumber);
             if (pSize) setPrinterSize(pSize);
+            if (mAddr) setMerchantAddress(mAddr);
+            
+            if (lastPrinter) {
+                setPrinterStatus(lastPrinter.name || lastPrinter.address);
+                setIsPrinterConnected(true);
+            }
         } catch (error) {
             console.error('Error loading profile:', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const scanAndConnectPrinter = async () => {
+        try {
+            setPrinterStatus(language === 'Tamil' ? 'தேடுகிறது...' : 'Scanning...');
+            const devices = await ThermalPrinter.discoverDevices();
+            if (devices && devices.length > 0) {
+                const printer = devices[0];
+                const success = await ThermalPrinter.connect(printer.address);
+                if (success) {
+                    await Storage.setItem('last_printer', printer);
+                    setPrinterStatus(printer.name || printer.address);
+                    setIsPrinterConnected(true);
+                    Alert.alert(language === 'Tamil' ? 'வெற்றி' : 'Success', language === 'Tamil' ? 'பிரிண்டர் இணைக்கப்பட்டது!' : 'Printer connected!');
+                }
+            } else {
+                setPrinterStatus(language === 'Tamil' ? 'பிரிண்டர் கிடைக்கவில்லை' : 'No printer found');
+                setIsPrinterConnected(false);
+            }
+        } catch (err) {
+            setPrinterStatus(language === 'Tamil' ? 'பிழை' : 'Error');
+            setIsPrinterConnected(false);
         }
     };
 
@@ -112,7 +149,8 @@ export default function MerchantProfileScreen() {
                 Storage.setItem(KEYS.MERCHANT_NAME, merchantName),
                 Storage.setItem(KEYS.MERCHANT_LOGO, merchantLogo),
                 Storage.setItem(KEYS.MERCHANT_NUMBER, merchantNumber),
-                Storage.setItem(KEYS.PRINTER_SIZE, printerSize)
+                Storage.setItem(KEYS.PRINTER_SIZE, printerSize),
+                Storage.setItem('merchant_address', merchantAddress)
             ]);
 
             Alert.alert(language === 'Tamil' ? 'வெற்றி' : "Success", language === 'Tamil' ? 'விவரங்கள் சேமிக்கப்பட்டன!' : "Profile updated successfully!");
@@ -135,15 +173,15 @@ export default function MerchantProfileScreen() {
             <StatusBar style="light" backgroundColor="#FF8C00" />
             
             <LinearGradient
-                colors={['#FF8C00', '#FFA500']}
-                style={[styles.header, { paddingTop: insets.top + verticalScale(20) }]}
+                colors={['#FF8C00', '#FF8C00']}
+                style={[styles.header, { paddingTop: insets.top + (Platform.OS === 'android' ? verticalScale(10) : verticalScale(8)) }]}
             >
                 <View style={styles.headerDecor} />
                 <View style={styles.headerTop}>
                     <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
                         <Ionicons name="arrow-back" size={24} color="#FF8C00" />
                     </TouchableOpacity>
-                    <View>
+                    <View style={{ flex: 1 }}>
                         <Text style={styles.headerTitle}>{language === 'Tamil' ? 'கடை விவரம்' : 'Shop Profile'}</Text>
                         <Text style={styles.headerSubtitle}>{language === 'Tamil' ? 'உங்கள் வணிக அடையாளத்தை நிர்வகிக்கவும்' : 'Manage your business identity'}</Text>
                     </View>
@@ -161,7 +199,7 @@ export default function MerchantProfileScreen() {
                             style={[styles.input, { color: textColor, borderColor: isDark ? '#333' : '#E2E8F0', backgroundColor: isDark ? '#2C2C2C' : '#F8FAFC' }]}
                             value={merchantName}
                             onChangeText={setMerchantName}
-                            placeholder={language === 'Tamil' ? 'எ.கா. சுஜி காய்கறிகள்' : "e.g. Suji Vegetables"}
+                            placeholder={language === 'Tamil' ? 'எ.கா. சுஜி காய்கறி கடை' : "e.g. Suji Vegetables"}
                             placeholderTextColor="#94A3B8"
                         />
                     </View>
@@ -192,24 +230,61 @@ export default function MerchantProfileScreen() {
                     </View>
 
                     <View style={styles.inputWrapper}>
-                        <Text style={[styles.inputLabel, { color: subTextColor }]}>{language === 'Tamil' ? 'அதிகாரப்பூர்வ சின்னம் (Logo)' : 'Official Logo'}</Text>
-                        <TouchableOpacity 
-                            style={[styles.logoPicker, { borderColor: isDark ? '#333' : '#E2E8F0', borderStyle: merchantLogo ? 'solid' : 'dashed' }]} 
-                            onPress={pickImage}
-                            activeOpacity={0.7}
-                        >
-                            {merchantLogo ? (
-                                <Image source={{ uri: merchantLogo }} style={styles.logoPreview} />
-                            ) : (
-                                <View style={styles.placeholderLogo}>
-                                    <View style={[styles.logoIconCircle, { backgroundColor: primaryColor + '15' }]}>
-                                        <Feather name="camera" size={28} color={primaryColor} />
-                                    </View>
-                                    <Text style={[styles.logoHint, { color: primaryColor }]}>{language === 'Tamil' ? 'படம் தேர்ந்தெடுக்கவும்' : 'Select Image'}</Text>
-                                </View>
-                            )}
-                        </TouchableOpacity>
+                        <Text style={[styles.inputLabel, { color: subTextColor }]}>{language === 'Tamil' ? 'கடை முகவரி' : 'Shop Address'}</Text>
+                        <TextInput
+                            style={[styles.input, { height: verticalScale(60), textAlignVertical: 'top', paddingTop: 10, color: textColor, borderColor: isDark ? '#333' : '#E2E8F0', backgroundColor: isDark ? '#2C2C2C' : '#F8FAFC' }]}
+                            value={merchantAddress}
+                            onChangeText={setMerchantAddress}
+                            placeholder={language === 'Tamil' ? 'எ.கா. மெயின் ரோடு, சென்னை' : "e.g. Main Road, Chennai"}
+                            placeholderTextColor="#94A3B8"
+                            multiline
+                            numberOfLines={2}
+                        />
                     </View>
+                </View>
+
+                {/* Business Management Card */}
+                <View style={[styles.card, { backgroundColor: cardBg }]}>
+                    <Text style={[styles.sectionCardTitle, { color: textColor }]}>
+                        {language === 'Tamil' ? 'வணிக மேலாண்மை' : 'Business Management'}
+                    </Text>
+
+                    <TouchableOpacity 
+                        style={styles.menuListItem}
+                        onPress={() => router.push('/shop/customers')}
+                        activeOpacity={0.7}
+                    >
+                        <View style={[styles.menuIconBox, { backgroundColor: '#3B82F615' }]}>
+                            <Ionicons name="people" size={20} color="#3B82F6" />
+                        </View>
+                        <Text style={[styles.menuListText, { color: textColor }]}>
+                            {language === 'Tamil' ? 'வாடிக்கையாளர் விவரங்கள்' : 'Manage Customers'}
+                        </Text>
+                        <Feather name="chevron-right" size={18} color={subTextColor} />
+                    </TouchableOpacity>
+
+                    <View style={styles.menuDivider} />
+
+                    <TouchableOpacity 
+                        style={styles.menuListItem}
+                        onPress={() => router.push('/shop/prices')}
+                        activeOpacity={0.7}
+                    >
+                        <View style={[styles.menuIconBox, { backgroundColor: '#FF8C0015' }]}>
+                            <Ionicons name="pricetag" size={20} color="#FF8C00" />
+                        </View>
+                        <Text style={[styles.menuListText, { color: textColor }]}>
+                            {language === 'Tamil' ? 'விலை நிர்ணயம்' : 'Set Daily Prices'}
+                        </Text>
+                        <Feather name="chevron-right" size={18} color={subTextColor} />
+                    </TouchableOpacity>
+                </View>
+
+                {/* Hardware Settings Card */}
+                <View style={[styles.card, { backgroundColor: cardBg }]}>
+                    <Text style={[styles.sectionCardTitle, { color: textColor }]}>
+                        {language === 'Tamil' ? 'பிரிண்டர் மற்றும் ஹார்டுவேர்' : 'Printer & Hardware'}
+                    </Text>
 
                     <View style={styles.inputWrapper}>
                         <Text style={[styles.inputLabel, { color: subTextColor }]}>{language === 'Tamil' ? 'பிரிண்டர் அளவு' : 'Default Printer Size'}</Text>
@@ -227,46 +302,118 @@ export default function MerchantProfileScreen() {
                                 <Text style={[styles.sizeOptionText, printerSize === '3inch' && { color: '#FFF' }]}>3-inch (80mm)</Text>
                             </TouchableOpacity>
                         </View>
-                        <Text style={[styles.sizeHint, { color: subTextColor }]}>
-                            {language === 'Tamil' ? 'தேர்வு செய்தவுடன் ஒவ்வொரு முறையும் கேட்காது.' : 'Choosing this will skip the size prompt during billing.'}
-                        </Text>
+                    </View>
+
+                    <View style={styles.menuDivider} />
+
+                    <View style={[styles.settingRow, { marginTop: 10 }]}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={[styles.settingLabel, { color: textColor }]}>
+                                {language === 'Tamil' ? 'ப்ளூடூத் பிரிண்டர்' : 'Bluetooth Printer'}
+                            </Text>
+                            <Text style={[styles.settingHint, { color: isPrinterConnected ? '#FF8C00' : subTextColor }]}>
+                                {printerStatus}
+                            </Text>
+                        </View>
+                        <TouchableOpacity 
+                            onPress={scanAndConnectPrinter}
+                            style={[styles.miniBtn, { backgroundColor: primaryColor + '15' }]}
+                        >
+                            <Text style={{ color: primaryColor, fontWeight: '800', fontSize: 12 }}>
+                                {language === 'Tamil' ? 'இணைக்கவும்' : 'Connect'}
+                            </Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
-                
+
+                {/* App Settings Card */}
                 <View style={[styles.card, { backgroundColor: cardBg }]}>
                     <Text style={[styles.sectionCardTitle, { color: textColor }]}>
-                        {language === 'Tamil' ? 'வணிக மேலாண்மை' : 'Business Management'}
+                        {language === 'Tamil' ? 'பயன்பாட்டு அமைப்புகள்' : 'App Settings'}
                     </Text>
 
-                    <TouchableOpacity 
-                        style={styles.menuListItem} 
-                        onPress={() => router.push('/shop/customers')}
-                        activeOpacity={0.7}
-                    >
-                        <View style={[styles.menuIconBox, { backgroundColor: '#3B82F615' }]}>
-                            <Ionicons name="people" size={20} color="#3B82F6" />
+                    <View style={styles.settingRow}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={[styles.settingLabel, { color: textColor }]}>
+                                {language === 'Tamil' ? 'இருண்ட பயன்முறை' : 'Dark Mode'}
+                            </Text>
+                            <Text style={[styles.settingHint, { color: subTextColor }]}>
+                                {isDark 
+                                    ? (language === 'Tamil' ? 'இரவு நேரத்திற்கு சிறந்தது' : 'Optimized for night use')
+                                    : (language === 'Tamil' ? 'பகல் நேரத்திற்கு சிறந்தது' : 'Classic bright interface')}
+                            </Text>
                         </View>
-                        <Text style={[styles.menuListText, { color: textColor }]}>
-                            {language === 'Tamil' ? 'வாடிக்கையாளர் விவரங்கள்' : 'Customer Details'}
-                        </Text>
-                        <Feather name="chevron-right" size={18} color={subTextColor} />
-                    </TouchableOpacity>
+                        <TouchableOpacity 
+                            onPress={toggleTheme}
+                            activeOpacity={0.8}
+                            style={[
+                                styles.themeToggle, 
+                                { backgroundColor: isDark ? primaryColor : '#E2E8F0' }
+                            ]}
+                        >
+                            <View style={[
+                                styles.themeToggleBall, 
+                                isDark ? { transform: [{ translateX: scale(22) }], backgroundColor: '#FFF' } : { transform: [{ translateX: 0 }], backgroundColor: '#FFF' }
+                            ]}>
+                                <Ionicons name={isDark ? "moon" : "sunny"} size={14} color={isDark ? primaryColor : '#64748B'} />
+                            </View>
+                        </TouchableOpacity>
+                    </View>
 
-                    <View style={[styles.menuDivider, { backgroundColor: isDark ? '#333' : '#F1F5F9' }]} />
+                    <View style={[styles.menuDivider, { backgroundColor: isDark ? '#333' : '#F1F5F9', marginVertical: verticalScale(15) }]} />
 
-                    <TouchableOpacity 
-                        style={styles.menuListItem} 
-                        onPress={() => router.push('/shop/prices')}
-                        activeOpacity={0.7}
-                    >
-                        <View style={[styles.menuIconBox, { backgroundColor: primaryColor + '15' }]}>
-                            <Ionicons name="pricetag" size={20} color={primaryColor} />
+                    <View style={styles.settingRow}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={[styles.settingLabel, { color: textColor }]}>
+                                {language === 'Tamil' ? 'மொழி தேர்வு' : 'Language'}
+                            </Text>
+                            <Text style={[styles.settingHint, { color: subTextColor }]}>
+                                {language === 'Tamil' ? 'தமிழ் அல்லது ஆங்கிலம்' : 'Choose Tamil or English'}
+                            </Text>
                         </View>
-                        <Text style={[styles.menuListText, { color: textColor }]}>
-                            {language === 'Tamil' ? 'விலை நிர்ணயம்' : 'Set Prices'}
-                        </Text>
-                        <Feather name="chevron-right" size={18} color={subTextColor} />
-                    </TouchableOpacity>
+                        <View style={styles.langSelector}>
+                           <TouchableOpacity 
+                            onPress={() => language !== 'Tamil' && toggleLanguage()}
+                            style={[styles.langOption, language === 'Tamil' && { backgroundColor: primaryColor, borderColor: primaryColor }]}
+                           >
+                               <Text style={[styles.langText, language === 'Tamil' && { color: '#FFF' }]}>தமிழ்</Text>
+                           </TouchableOpacity>
+                           <TouchableOpacity 
+                            onPress={() => language !== 'English' && toggleLanguage()}
+                            style={[styles.langOption, language === 'English' && { backgroundColor: primaryColor, borderColor: primaryColor }]}
+                           >
+                               <Text style={[styles.langText, language === 'English' && { color: '#FFF' }]}>ENG</Text>
+                           </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+
+                {/* Branding Card */}
+                <View style={[styles.card, { backgroundColor: cardBg }]}>
+                     <Text style={[styles.sectionCardTitle, { color: textColor }]}>
+                        {language === 'Tamil' ? 'பிராண்டிங்' : 'Branding'}
+                    </Text>
+                    <View style={[styles.inputWrapper, { alignItems: 'center' }]}>
+                        <Text style={[styles.inputLabel, { color: subTextColor, alignSelf: 'flex-start' }]}>{language === 'Tamil' ? 'அதிகாரப்பூர்வ சின்னம் (Logo)' : 'Official Logo'}</Text>
+                        <TouchableOpacity 
+                            style={[styles.logoPicker, { borderColor: isDark ? '#333' : '#E2E8F0', borderStyle: merchantLogo ? 'solid' : 'dashed' }]} 
+                            onPress={pickImage}
+                            activeOpacity={0.7}
+                        >
+                            {merchantLogo ? (
+                                <Image source={{ uri: merchantLogo }} style={styles.logoPreview} />
+                            ) : (
+                                <View style={styles.placeholderLogo}>
+                                    <View style={[styles.logoIconCircle, { backgroundColor: primaryColor + '15' }]}>
+                                        <Feather name="camera" size={20} color={primaryColor} />
+                                    </View>
+                                </View>
+                            )}
+                        </TouchableOpacity>
+                        {!merchantLogo && (
+                            <Text style={[styles.logoHint, { color: primaryColor, marginTop: 8 }]}>{language === 'Tamil' ? 'படம் தேர்ந்தெடுக்கவும்' : 'Select Image'}</Text>
+                        )}
+                    </View>
                 </View>
 
                 <TouchableOpacity 
@@ -290,10 +437,15 @@ const styles = StyleSheet.create({
     container: { flex: 1 },
     header: {
         paddingHorizontal: scale(25),
-        paddingBottom: verticalScale(30),
+        paddingBottom: verticalScale(20),
         borderBottomLeftRadius: scale(32),
         borderBottomRightRadius: scale(32),
         overflow: 'hidden',
+        elevation: 8,
+        shadowColor: '#FF8C00',
+        shadowOpacity: 0.2,
+        shadowOffset: { width: 0, height: 10 },
+        shadowRadius: 15,
     },
     headerDecor: {
         position: 'absolute',
@@ -309,20 +461,20 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     backBtn: {
-        width: scale(46),
-        height: scale(46),
-        borderRadius: scale(16),
+        width: scale(38),
+        height: scale(38),
+        borderRadius: scale(12),
         backgroundColor: '#FFF',
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: scale(18),
+        marginRight: scale(15),
         elevation: 5,
         shadowColor: '#000',
         shadowOpacity: 0.1,
         shadowRadius: 10,
     },
     headerTitle: {
-        fontSize: moderateScale(26),
+        fontSize: moderateScale(20),
         fontWeight: '900',
         color: '#FFF',
         letterSpacing: -0.5,
@@ -333,33 +485,35 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         marginTop: verticalScale(2),
     },
-    scrollContent: { padding: scale(20) },
+    scrollContent: { padding: scale(16) },
     card: {
-        borderRadius: scale(24),
-        padding: scale(22),
-        marginBottom: verticalScale(25),
+        borderRadius: scale(20),
+        padding: scale(16),
+        marginBottom: verticalScale(16),
         elevation: 3,
         shadowColor: '#000',
         shadowOpacity: 0.05,
-        shadowRadius: 15,
-        shadowOffset: { width: 0, height: 8 },
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 4 },
     },
-    inputWrapper: { marginBottom: verticalScale(20) },
+    inputWrapper: { marginBottom: verticalScale(16) },
     inputLabel: { fontSize: moderateScale(13), fontWeight: '700', marginBottom: verticalScale(8), letterSpacing: 0.3 },
-    input: { height: verticalScale(56), borderRadius: scale(16), borderWidth: 1.5, paddingHorizontal: scale(18), fontSize: moderateScale(16), fontWeight: '600' },
+    input: { height: verticalScale(50), borderRadius: scale(14), borderWidth: 1.5, paddingHorizontal: scale(16), fontSize: moderateScale(15), fontWeight: '600' },
     logoPicker: {
-        height: scale(160),
-        borderRadius: scale(24),
-        borderWidth: 2,
+        width: scale(90),
+        height: scale(90),
+        borderRadius: scale(45),
+        borderWidth: 1.5,
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',
         backgroundColor: '#F8FAFC',
+        marginTop: verticalScale(5),
     },
     logoPreview: { width: '100%', height: '100%', resizeMode: 'cover' },
-    placeholderLogo: { alignItems: 'center' },
-    logoIconCircle: { width: scale(60), height: scale(60), borderRadius: scale(30), alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-    logoHint: { fontSize: moderateScale(14), fontWeight: '800' },
+    placeholderLogo: { alignItems: 'center', justifyContent: 'center' },
+    logoIconCircle: { width: scale(40), height: scale(40), borderRadius: scale(20), alignItems: 'center', justifyContent: 'center' },
+    logoHint: { fontSize: moderateScale(12), fontWeight: '700' },
     changeLogoBtn: { alignSelf: 'center', marginTop: verticalScale(10), paddingVertical: 5, paddingHorizontal: 15 },
     saveBtn: {
         height: verticalScale(62),
@@ -400,6 +554,13 @@ const styles = StyleSheet.create({
     menuDivider: {
         height: 1,
         width: '100%',
+        backgroundColor: '#F1F5F9',
+        marginVertical: 12,
+    },
+    miniBtn: {
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 8,
     },
     errorText: {
         color: '#EF4444',
@@ -432,5 +593,54 @@ const styles = StyleSheet.create({
         fontSize: moderateScale(10),
         marginTop: 6,
         fontStyle: 'italic',
+    },
+    settingRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    settingLabel: {
+        fontSize: moderateScale(15),
+        fontWeight: '700',
+    },
+    settingHint: {
+        fontSize: moderateScale(11),
+        marginTop: 2,
+    },
+    themeToggle: {
+        width: scale(52),
+        height: scale(28),
+        borderRadius: scale(14),
+        padding: scale(3),
+        justifyContent: 'center',
+    },
+    themeToggleBall: {
+        width: scale(22),
+        height: scale(22),
+        borderRadius: scale(11),
+        alignItems: 'center',
+        justifyContent: 'center',
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+    },
+    langSelector: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    langOption: {
+        paddingHorizontal: scale(12),
+        paddingVertical: verticalScale(6),
+        borderRadius: scale(8),
+        borderWidth: 1.5,
+        borderColor: '#E2E8F0',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    langText: {
+        fontSize: moderateScale(12),
+        fontWeight: '800',
+        color: '#64748B',
     },
 });
