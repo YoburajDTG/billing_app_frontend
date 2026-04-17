@@ -40,7 +40,8 @@
           }
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      "./with-cpp20"
     ],
     "experiments": {
       "typedRoutes": true,
