@@ -1,37 +1,34 @@
-const { withProjectBuildGradle, withAppBuildGradle, withSettingsGradle } = require("@expo/config-plugins");
+const { withProjectBuildGradle, withAppBuildGradle, withSettingsGradle, withGradleProperties } = require("@expo/config-plugins");
 
 /**
- * Expo Config Plugin to fix C++20 flags, SDK versions, and Tamil name encoding issues
+ * Expo Config Plugin - THE ABSOLUTE ULTIMATE FIX
  */
 const withAndroidFixes = (config) => {
-  // 1. Fix C++ Flags in app/build.gradle
+  // 1. C++20 Fix
   config = withAppBuildGradle(config, (config) => {
     if (config.modResults.language === "groovy") {
-      const buildGradle = config.modResults.contents;
+      let buildGradle = config.modResults.contents;
       if (!buildGradle.includes('cppFlags "-std=c++20"')) {
         const searchPattern = /defaultConfig\s*\{/;
         const replacement = `defaultConfig {
-        externalNativeBuild {
-            cmake {
-                cppFlags "-std=c++20"
-            }
-        }`;
-        config.modResults.contents = buildGradle.replace(searchPattern, replacement);
+        externalNativeBuild { cmake { cppFlags "-std=c++20" } }`;
+        buildGradle = buildGradle.replace(searchPattern, replacement);
       }
+      config.modResults.contents = buildGradle;
     }
     return config;
   });
 
-  // 2. Force SDK versions for all subprojects safely (Avoid afterEvaluate crash)
+  // 2. SDK 34 + Java 17 + AndroidX Force Fix
   config = withProjectBuildGradle(config, (config) => {
     if (config.modResults.language === "groovy") {
       let contents = config.modResults.contents;
       const forceSdkBlock = `
-/** FORCE SDK FIXES **/
+/** FORCE FIX **/
 subprojects {
-    def applyAndroidFix = { p ->
-        if (p.hasProperty('android')) {
-            p.android {
+    afterEvaluate { project ->
+        if (project.hasProperty('android')) {
+            project.android {
                 compileSdkVersion 34
                 buildToolsVersion "34.0.0"
                 defaultConfig { targetSdkVersion 34 }
@@ -40,30 +37,33 @@ subprojects {
                     targetCompatibility JavaVersion.VERSION_17
                 }
             }
+            project.configurations.all {
+                resolutionStrategy.force 'androidx.core:core:1.12.0'
+                resolutionStrategy.force 'androidx.appcompat:appcompat:1.6.1'
+            }
         }
-    }
-    if (it.state.executed) {
-        applyAndroidFix(it)
-    } else {
-        it.afterEvaluate { applyAndroidFix(it) }
     }
 }
 `;
-      if (!contents.includes("FORCE SDK FIXES")) {
-          contents += forceSdkBlock;
-      }
+      if (!contents.includes("/** FORCE FIX **/")) { contents += forceSdkBlock; }
       config.modResults.contents = contents;
     }
     return config;
   });
 
-  // 3. Fix Tamil Name Encoding issues in settings.gradle
+  // 3. Project Name Fix
   config = withSettingsGradle(config, (config) => {
     if (config.modResults.language === "groovy") {
       let contents = config.modResults.contents;
       contents = contents.replace(/rootProject\.name\s*=\s*['"].*['"]/, "rootProject.name = 'suji-veg-billing'");
       config.modResults.contents = contents;
     }
+    return config;
+  });
+
+  // 4. JETIFIER FIX (Crucial for old libraries)
+  config = withGradleProperties(config, (config) => {
+    config.modResults.push({ type: 'property', key: 'android.enableJetifier', value: 'true' });
     return config;
   });
 
