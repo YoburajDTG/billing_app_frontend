@@ -41,7 +41,8 @@
         }
       ],
       "expo-sqlite",
-      "./with-cpp20"
+      "./with-cpp20",
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,
