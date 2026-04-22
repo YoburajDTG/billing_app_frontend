@@ -13,13 +13,13 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ThermalPrinter } from "@/utils/thermalPrinter";
+import { ThermalPrinter, isPrinterAvailable } from "@/utils/thermalPrinter";
 import { useFocusEffect } from "@react-navigation/native";
 import { NativeModules } from 'react-native';
 import * as Contacts from 'expo-contacts';
 import ViewShot, { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
-const { BluetoothManager } = NativeModules;
+// Removed direct NativeModules access to avoid crashes in Expo Go
 
 import {
   Alert,
@@ -69,16 +69,18 @@ export default function ShopScreen() {
   const { user, updateUser } = useAuth();
   const navigation = useNavigation();
   const router = useRouter();
-  const { mode, timestamp } = useLocalSearchParams<{ mode: string; timestamp?: string }>();
+  const { mode, timestamp, waitBillId } = useLocalSearchParams<{ mode: string; timestamp?: string; waitBillId?: string }>();
   const [isWholesale, setIsWholesale] = useState(mode === "wholesale");
+  const [editingBillId, setEditingBillId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"list" | "card">("list");
   const insets = useSafeAreaInsets();
 
-  const { t, theme, isDark, toggleTheme, language } = useAppTheme();
+  const { t, theme, isDark, toggleTheme, language, primaryColor } = useAppTheme();
 
   // States
   const [allVegetables, setAllVegetables] = useState<Vegetable[]>([]);
   const [cart, setCart] = useState<BillItem[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All Items");
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
@@ -95,6 +97,8 @@ export default function ShopScreen() {
   const [nextBillId, setNextBillId] = useState("");
   const [printerPreference, setPrinterPreference] = useState<'2inch' | '3inch'>('2inch');
   const [shopName, setShopName] = useState("");
+  const [shopPhone, setShopPhone] = useState("");
+  const [shopAddress, setShopAddress] = useState("");
   const [isPrinterConnected, setIsPrinterConnected] = useState(false);
   const [showPrinterModal, setShowPrinterModal] = useState(false);
   const [pairedDevices, setPairedDevices] = useState<any[]>([]);
@@ -114,15 +118,56 @@ export default function ShopScreen() {
     // Hide default header
     navigation.setOptions({ headerShown: false });
     loadSettings();
-  }, []);
+    
+    if (waitBillId) {
+      loadBillForEditing(waitBillId);
+    }
+  }, [waitBillId]);
+
+  const loadBillForEditing = async (billId: string) => {
+    if (!billId) return;
+    try {
+      const { data } = await billDbService.getWithItems(billId);
+      if (data) {
+        const { bill, items } = data;
+        setEditingBillId(bill.id);
+        setCustomerName(bill.customer_name || "");
+        setCustomerMobile(bill.customer_mobile || "");
+        setDiscount(bill.discount || 0);
+        setIsWholesale(bill.mode === "Wholesale");
+        setNextBillId(bill.id);
+        
+        const cartItems: BillItem[] = items.map(item => ({
+          id: item.vegetable_id,
+          name: item.name || "",
+          tamilName: item.tamil_name || "",
+          price: item.unit_price,
+          quantity: item.quantity,
+          total: item.total_price,
+          image: "" 
+        }));
+        
+        const uniqueCart = Array.from(new Map(cartItems.map(i => [i.id, i])).values());
+        setCart(uniqueCart);
+        // Clear param to avoid duplicate loads on re-focus
+        router.setParams({ waitBillId: undefined });
+      }
+    } catch (error) {
+      console.error("Failed to load bill for editing:", error);
+    }
+  };
 
   const loadSettings = async () => {
-    const [pSize, mName] = await Promise.all([
+    const [pSize, mName, mPhone, mAddr] = await Promise.all([
       Storage.getItem(KEYS.PRINTER_SIZE),
-      Storage.getItem(KEYS.MERCHANT_NAME)
+      Storage.getItem(KEYS.MERCHANT_NAME),
+      Storage.getItem(KEYS.MERCHANT_NUMBER),
+      Storage.getItem(KEYS.MERCHANT_ADDRESS)
     ]);
     if (pSize) setPrinterPreference(pSize);
     if (mName) setShopName(mName);
+    if (mPhone) setShopPhone(mPhone);
+    if (mAddr) setShopAddress(mAddr);
 
     const lastPrinter = await Storage.getItem('last_printer');
     if (lastPrinter) {
@@ -188,7 +233,10 @@ export default function ShopScreen() {
   useFocusEffect(
     useCallback(() => {
       loadVegetables();
-    }, [timestamp])
+      if (waitBillId && waitBillId !== editingBillId) {
+        loadBillForEditing(waitBillId as string);
+      }
+    }, [timestamp, waitBillId, editingBillId])
   );
 
   useEffect(() => {
@@ -452,65 +500,154 @@ export default function ShopScreen() {
 
   const handleCheckout = async () => {
     if (cart.length === 0) return;
-    try {
-      const { data } = await billDbService.getNextId();
-      setNextBillId(data);
-    } catch (error) {
-      console.error("Failed to fetch next bill ID:", error);
+    
+    // Only fetch next ID if we are NOT editing a waiting bill
+    if (!editingBillId) {
+      try {
+        const { data } = await billDbService.getNextId();
+        setNextBillId(data);
+      } catch (error) {
+        console.error("Failed to fetch next bill ID:", error);
+      }
     }
+    
     setBillPreviewVisible(true);
+  };
+
+  const handleWaitBill = async () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    try {
+      const billData = {
+        total_amount: cartTotal - (parseFloat(discount.toString()) || 0),
+        discount: parseFloat(discount.toString()) || 0,
+        customer_name: customerName,
+        customer_mobile: (customerMobile || "").trim().replace(/\D/g, ''),
+        payment_status: 'WAITING',
+        mode: isWholesale ? "Wholesale" : "Retail",
+        items: cart.map(item => ({
+          vegetable_id: item.id,
+          name: item.name,
+          tamil_name: item.tamilName,
+          quantity: item.quantity,
+          unit_price: item.price,
+          total_price: item.total
+        }))
+      };
+
+      if (editingBillId) {
+        await billDbService.update(editingBillId, billData);
+        Alert.alert(language === 'Tamil' ? 'வெற்றி' : "Success", language === 'Tamil' ? 'காத்திருப்பு பட்டியல் புதுப்பிக்கப்பட்டது' : "Wait bill updated");
+      } else {
+        await billDbService.create(billData);
+        Alert.alert(language === 'Tamil' ? 'வெற்றி' : "Success", language === 'Tamil' ? 'காத்திருப்பு பட்டியலில் சேர்க்கப்பட்டது' : "Moved to waiting list");
+      }
+      
+      setBillPreviewVisible(false);
+      setCart([]);
+      setCustomerName("");
+      setCustomerMobile("");
+      setDiscount(0);
+      setEditingBillId(null);
+      setIsProcessing(false);
+    } catch (error) {
+      console.error(error);
+      setIsProcessing(false);
+      Alert.alert("Error", "Failed to save wait bill");
+    }
   };
 
   const finalizeBill = async () => {
     // Proceed to print/save
     try {
-      const [mName, mNumber] = await Promise.all([
-        Storage.getItem(KEYS.MERCHANT_NAME),
-        Storage.getItem(KEYS.MERCHANT_NUMBER),
-      ]);
-
+      const billId = nextBillId || `B${Date.now()}`;
       const billData = {
-        shopName: mName || "சுஜி காய்கறி கடை",
+        shopName: shopName || "சுஜி காய்கறி கடை",
         logo: "Logo_bill.png",
-        phone: mNumber || "9095938085",
-        address: "", // Leave blank to use Tamil default in generator
+        phone: shopPhone || "9095938085",
+        address: shopAddress || "பாண்டி - திண்டிவனம் மெயின் ரோடு, கிளியனூர்.",
         userName: customerName || (language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Walk-in Customer'),
-        billNumber: nextBillId, // Use the predicted next ID
+        billId: billId, // For DB
+        billNumber: billId, // For Print
         date: new Date().toLocaleString("en-IN"),
         mode: isWholesale ? "Wholesale" : "Retail",
+        payment_status: 'PAID',
         language: language,
         items: cart.map((item) => ({
           id: item.id,
           name: item.tamilName || item.name,
           tamilName: item.tamilName,
           quantity: item.quantity,
+          unitPrice: item.price,
           price: item.price,
           discount: item.itemDiscount || 0,
+          totalPrice: parseFloat(item.total.toFixed(2)),
           total: parseFloat(item.total.toFixed(2)),
         })),
+        totalAmount: parseFloat((cartTotal - (parseFloat(discount.toString()) || 0)).toFixed(2)),
         subTotal: parseFloat(cartTotal.toFixed(2)),
         discount: parseFloat(discount.toString()) || 0,
         grandTotal: parseFloat((cartTotal - (parseFloat(discount.toString()) || 0)).toFixed(2)),
       } as any;
 
-      // Print directly using the selected preference from the Modal
-      processBill(billData, true, printerPreference);
+      if (editingBillId) {
+          const updatePayload = {
+              total_amount: billData.grandTotal,
+              discount: billData.discount,
+              customer_name: billData.userName,
+              customer_mobile: (customerMobile || "").trim().replace(/\D/g, ''),
+              payment_status: 'PAID',
+              items: cart.map(item => ({
+                vegetable_id: item.id,
+                name: item.name,
+                tamil_name: item.tamilName,
+                quantity: item.quantity,
+                unit_price: item.price,
+                total_price: item.total
+              }))
+          };
+          await billDbService.update(editingBillId, updatePayload);
+          setEditingBillId(null);
+      } else {
+          await SyncManager.queueBill(billData);
+      }
+
+      // 🔄 AUTO PRINT LOGIC
+      setCart([]);
+      setBillPreviewVisible(false);
+      setCustomerName("");
+      setDiscount("");
+      setNextBillId("");
+      
+      // Attempt auto print if enabled
+      await ThermalPrinter.autoPrintAfterSave({
+        shopName: billData.shopName,
+        billId: billData.billNumber,
+        date: billData.date,
+        items: billData.items,
+        totalAmount: billData.grandTotal,
+        customerName: billData.userName,
+        shopPhone: billData.phone,
+        shopAddress: billData.address
+      });
+
+      Alert.alert(
+        language === 'Tamil' ? 'வெற்றி' : "Success", 
+        language === 'Tamil' ? 'பில் வெற்றிகரமாக சேமிக்கப்பட்டது' : "Bill Saved Successfully"
+      );
+
     } catch (error) {
       console.error(error);
-      Alert.alert("Error", "Could not prepare bill data");
+      Alert.alert("Error", "Could not complete bill process");
     }
   };
 
   const handleWhatsAppShare = async () => {
     try {
-      const [mName, mNumber] = await Promise.all([
-        Storage.getItem(KEYS.MERCHANT_NAME),
-        Storage.getItem(KEYS.MERCHANT_NUMBER),
-      ]);
-
       const billData = {
-        shopName: mName || "சுஜி காய்கறி கடை",
-        phone: mNumber || "9095938085",
+        shopName: shopName || "சுஜி காய்கறி கடை",
+        phone: shopPhone || "9095938085",
+        address: shopAddress || "பாண்டி - திண்டிவனம் மெயின் ரோடு, கிளியனூர்.",
         userName: customerName || (language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Walk-in Customer'),
         billNumber: nextBillId,
         date: new Date().toLocaleString("en-IN"),
@@ -525,6 +662,7 @@ export default function ShopScreen() {
       };
 
       let message = `🧾 *${billData.shopName.toUpperCase()}*\n`;
+      if (billData.address) message += `${billData.address}\n`;
       message += `${language === 'Tamil' ? 'போன்' : 'Ph'}: ${billData.phone}\n`;
       message += `--------------------------\n`;
       message += `${language === 'Tamil' ? 'பில் எண்' : 'Bill No'}: *${billData.billNumber}*\n`;
@@ -570,45 +708,27 @@ export default function ShopScreen() {
     }
   };
 
-  const processBill = async (billData: any, printDirect: boolean, printerSize: '2inch' | '3inch' = '2inch') => {
+  const processBill = async (billData: any) => {
     try {
-      const savedBill = await SyncManager.queueBill(billData);
-      
-      // Update PDF data with the real ID from DB (just in case it changed)
-      const finalBillData = { ...billData, billNumber: savedBill.id };
-      
-      if (isPrinterConnected) {
-        await ThermalPrinter.printReceipt({
-          shopName: finalBillData.shopName,
-          billId: finalBillData.billNumber,
-          date: finalBillData.date,
-          items: finalBillData.items.map((i: any) => ({
-            name: i.name,
-            tamilName: i.tamilName,
-            quantity: i.quantity,
-            unitPrice: i.price,
-            totalPrice: i.total
-          })),
-          totalAmount: finalBillData.grandTotal,
-          customerName: finalBillData.userName
-        });
-      } else {
-        await generateBillPDF(finalBillData, { printDirect, printerSize });
-      }
-      
-      Alert.alert(
-        language === 'Tamil' ? 'வெற்றி' : "Success", 
-        language === 'Tamil' ? 'பில் வெற்றிகரமாக உருவாக்கப்பட்டது' : "Bill Generated Successfully"
-      );
-      
-      setCart([]);
-      setBillPreviewVisible(false);
-      setCustomerName("");
-      setDiscount(0);
-      setNextBillId("");
+      await ThermalPrinter.printInvoice({
+        shopName: billData.shopName,
+        billId: billData.billNumber,
+        date: billData.date,
+        items: billData.items.map((i: any) => ({
+          name: i.name,
+          tamilName: i.tamilName,
+          quantity: i.quantity,
+          unitPrice: i.price,
+          totalPrice: i.total
+        })),
+        totalAmount: billData.grandTotal,
+        customerName: billData.userName,
+        shopPhone: billData.phone,
+        shopAddress: billData.address
+      });
     } catch (error) {
       console.error(error);
-      Alert.alert("Error", "Could not complete bill process");
+      Alert.alert("Error", "Could not print bill");
     }
   };
 
@@ -656,9 +776,9 @@ export default function ShopScreen() {
       style={styles.thermalCaptureContainer}
     >
       <View style={styles.thermalContent}>
-        <Text style={styles.thermalShopName}>சுஜி காய்கறி கடை</Text>
-        <Text style={styles.thermalShopLoc}>பாண்டி - திண்டிவனம் மெயின் ரோடு, கிளியனூர்.</Text>
-        <Text style={styles.thermalShopContact}>Phone: {shopPhone || "9095938085"}</Text>
+        <Text style={styles.thermalShopName}>{shopName || "சுஜி காய்கறி கடை"}</Text>
+        <Text style={styles.thermalShopLoc}>{shopAddress || "பாண்டி - திண்டிவனம் மெயின் ரோடு, கிளியனூர்."}</Text>
+        <Text style={styles.thermalShopContact}>{language === 'Tamil' ? 'போன்' : 'Ph'}: {shopPhone || "9095938085"}</Text>
         
         <Text style={styles.thermalDivider}>------------------------------------------</Text>
         
@@ -736,7 +856,7 @@ export default function ShopScreen() {
             const Share = require('react-native-share').default;
             const FileSystem = require('expo-file-system');
             
-            const targetPhone = `91${cleanPhone.slice(-10)}`;
+            const targetPhone = `+91${cleanPhone.slice(-10)}`;
             console.log('Direct Target Injection:', targetPhone);
             
             // Step 1: Ensure image is in a stable cache location with .jpg extension
@@ -749,12 +869,13 @@ export default function ShopScreen() {
               whatsAppNumber: targetPhone,
               url: shareUri,
               type: 'image/jpeg',
-              appId: "com.whatsapp",
               forceFullApp: true,
             };
             
             // Step 2: Attempt standard WhatsApp
             try {
+              // On modern Android, WhatsApp often ignores the number when sharing files. 
+              // We try to use the most direct intent parameters available.
               await Share.shareSingle(shareOptions);
             } catch (waErr) {
               console.warn('Standard WhatsApp failed, trying Business version...');
@@ -867,7 +988,7 @@ export default function ShopScreen() {
     </View>
   );
 
-  const primaryColor = "#FF8C00";
+  // const primaryColor = "#FF8C00"; // Removed local override to use context color
   const accentColor = "#E67E00";
   const textColor = isDark ? "#FFFFFF" : "#1A1C1E";
   const labelColor = isDark ? "#BBB" : "#6B7280";
@@ -907,7 +1028,7 @@ export default function ShopScreen() {
         </TouchableOpacity>
 
         {isSelected && (
-          <View style={styles.checkBadge}>
+          <View style={[styles.checkBadge, { backgroundColor: primaryColor }]}>
             <Feather name="check" size={12} color="#FFF" />
           </View>
         )}
@@ -1046,7 +1167,7 @@ export default function ShopScreen() {
 
         {isSelected && (
           <View
-            style={[styles.checkBadge, { top: -scale(6), right: -scale(6) }]}
+            style={[styles.checkBadge, { top: -scale(6), right: -scale(6), backgroundColor: primaryColor }]}
           >
             <Feather name="check" size={12} color="#FFF" />
           </View>
@@ -1161,12 +1282,12 @@ export default function ShopScreen() {
     <View style={[styles.container, { backgroundColor: bg }]}>
       <StatusBar
         style={isDark ? "light" : "light"}
-        backgroundColor={isDark ? "#1A1A1A" : "#FF8C00"}
+        backgroundColor={isDark ? "#1A1A1A" : primaryColor}
       />
 
       {/* Header */}
       <LinearGradient
-        colors={isDark ? ["#1A1A1A", "#1A1A1A"] : ["#FF8C00", "#FF8C00"]}
+        colors={isDark ? ["#1A1A1A", "#1A1A1A"] : [primaryColor, primaryColor]}
         style={[
           styles.header,
           { paddingTop: insets.top + (Platform.OS === "android" ? 10 : 0) },
@@ -1180,7 +1301,29 @@ export default function ShopScreen() {
               {shopName || user?.shopName || "Vegetable Shop"}
             </Text>
             <View style={styles.headerSubtitleRow}>
-              <View style={[styles.statusDotHeader, { backgroundColor: isPrinterConnected ? '#FFB347' : '#F87171' }]} />
+              <TouchableOpacity 
+                activeOpacity={0.7}
+                onPress={() => {
+                  scanPrinters();
+                  setShowPrinterModal(true);
+                }}
+                style={[
+                    styles.printerBadgeHeader, 
+                    { 
+                        backgroundColor: isPrinterConnected ? '#4ADE8030' : '#F8717130',
+                        borderColor: isPrinterConnected ? '#4ADE80' : '#F87171',
+                    }
+                ]}
+              >
+                <MaterialCommunityIcons 
+                    name={isPrinterConnected ? "printer-check" : "printer-off"} 
+                    size={10} 
+                    color={isPrinterConnected ? '#4ADE80' : '#F87171'} 
+                />
+                <Text style={[styles.printerBadgeText, { color: isPrinterConnected ? '#4ADE80' : '#F87171' }]}>
+                    {isPrinterConnected ? (language === 'Tamil' ? 'ஆன்' : 'ON') : (language === 'Tamil' ? 'இணைப்பு' : 'CONNECT')}
+                </Text>
+              </TouchableOpacity>
               <Text
                 style={[
                   styles.shopSubtitle,
@@ -1587,7 +1730,7 @@ export default function ShopScreen() {
 
                   {/* Total Preview */}
                   {qtyInput && priceInput && (
-                    <View style={styles.totalPreview}>
+                    <View style={[styles.totalPreview, { backgroundColor: primaryColor + '08', borderColor: primaryColor + '20' }]}>
                       <Text style={[styles.totalLabel, { color: labelColor }]}>
                         Total Amount:
                       </Text>
@@ -1610,7 +1753,7 @@ export default function ShopScreen() {
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[styles.confirmBtn, { backgroundColor: primaryColor }]}
+                    style={[styles.confirmBtn, { backgroundColor: primaryColor, shadowColor: primaryColor }]}
                     onPress={confirmManualEntry}
                   >
                     <Text style={styles.confirmBtnText}>Add to Cart</Text>
@@ -1649,9 +1792,40 @@ export default function ShopScreen() {
                         </TouchableOpacity>
                     )}
                     ListEmptyComponent={
-                        <View style={{ padding: 20, alignItems: 'center' }}>
-                            <Text style={{ color: labelColor }}>{isScanning ? 'Scanning...' : 'No paired printers found'}</Text>
-                        </View>
+                      <View style={{ padding: 25, alignItems: 'center', justifyContent: 'center' }}>
+                        <MaterialCommunityIcons 
+                          name={!isPrinterAvailable ? "alert-circle-outline" : "bluetooth-off"} 
+                          size={48} 
+                          color={isDark ? "#444" : "#CCC"} 
+                        />
+                        <Text style={{ 
+                          color: textColor, 
+                          fontWeight: '800', 
+                          fontSize: 16, 
+                          marginTop: 15,
+                          textAlign: 'center' 
+                        }}>
+                          {!isPrinterAvailable 
+                            ? (language === 'Tamil' ? 'பிரிண்டர் மாட்யூல் கிடைக்கவில்லை' : 'Printer Module Not Found') 
+                            : (language === 'Tamil' ? 'பிரிண்டர் எதுவும் கிடைக்கவில்லை' : 'No Printers Found')}
+                        </Text>
+                        <Text style={{ 
+                          color: labelColor, 
+                          fontSize: 13, 
+                          marginTop: 8, 
+                          textAlign: 'center',
+                          lineHeight: 18 
+                        }}>
+                          {!isPrinterAvailable 
+                            ? (language === 'Tamil' 
+                               ? 'தயவு செய்து APK-வை இன்ஸ்டால் செய்யவும். Expo Go-வில் பிரிண்டர் வேலை செய்யாது.' 
+                               : 'Bluetooth printer features only work in an installed APK / Dev Build, not in Expo Go.')
+                            : (language === 'Tamil'
+                               ? '1. புளூடூத் ஆன் செய்யப்பட்டுள்ளதா என சரிபார்க்கவும்.\n2. போன் செட்டிங்ஸில் பிரிண்டரை Pair செய்யவும்.'
+                               : '1. Ensure Bluetooth is ON.\n2. Pair the printer in Android Bluetooth Settings first.')
+                          }
+                        </Text>
+                      </View>
                     }
                 />
                 
@@ -1675,7 +1849,7 @@ export default function ShopScreen() {
           <StatusBar style={isDark ? 'light' : 'light'} backgroundColor={isDark ? '#1A1A1A' : primaryColor} />
           
           <LinearGradient
-            colors={isDark ? ["#1A1A1A", "#1A1A1A"] : ["#FF8C00", "#FF8C00"]}
+            colors={isDark ? ["#1A1A1A", "#1A1A1A"] : [primaryColor, primaryColor]}
             style={[
               styles.fixedHeader,
               { paddingTop: insets.top + (Platform.OS === 'android' ? 5 : 2) }
@@ -1693,7 +1867,28 @@ export default function ShopScreen() {
                   {language === 'Tamil' ? 'பில் முன்னோட்டம்' : 'Invoice Preview'}
                 </Text>
               </View>
-              <View style={{ width: scale(36) }} />
+              <TouchableOpacity
+                onPress={handleWaitBill}
+                disabled={isProcessing}
+                style={[
+                    styles.closeBtnCircle, 
+                    { 
+                        width: 'auto', 
+                        paddingHorizontal: scale(12), 
+                        backgroundColor: isProcessing ? '#CCC' : '#FF9800', 
+                        borderRadius: scale(10),
+                        flexDirection: 'row',
+                        gap: 6,
+                        elevation: 4,
+                        opacity: isProcessing ? 0.7 : 1,
+                    }
+                ]}
+              >
+                <MaterialCommunityIcons name="clock-outline" size={18} color="#FFF" />
+                <Text style={{ color: '#FFF', fontWeight: '900', fontSize: moderateScale(12) }}>
+                  {isProcessing ? '...' : (language === 'Tamil' ? 'காத்திருப்பு' : 'Wait Bill')}
+                </Text>
+              </TouchableOpacity>
             </View>
           </LinearGradient>
 
@@ -1704,9 +1899,9 @@ export default function ShopScreen() {
                 position: 'absolute', 
                 top: 0, 
                 left: 0, 
-                opacity: 0.05, 
-                zIndex: -100, 
-                width: 400,
+                opacity: 0.01, 
+                zIndex: -999, 
+                width: 450,
               }} 
             >
               <ThermalReceiptView 
@@ -1717,8 +1912,9 @@ export default function ShopScreen() {
                  cart={cart}
                  total={cartTotal}
                  disc={discount}
-                 shopName={user?.shopName}
-                 shopPhone={user?.phone}
+                 shopName={shopName}
+                 shopPhone={shopPhone}
+                 shopAddress={shopAddress}
               />
             </View>
 
@@ -1755,8 +1951,8 @@ export default function ShopScreen() {
                 </View>
 
                 <View style={[styles.quickStatCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
-                  <View style={[styles.quickStatIcon, { backgroundColor: '#FF8C0015' }]}>
-                    <MaterialCommunityIcons name="calendar" size={20} color="#FF8C00" />
+                  <View style={[styles.quickStatIcon, { backgroundColor: primaryColor + '15' }]}>
+                    <MaterialCommunityIcons name="calendar" size={20} color={primaryColor} />
                   </View>
                   <Text style={[styles.quickStatValue, { color: textColor, fontSize: 16 }]}>{new Date().toLocaleDateString('en-IN')}</Text>
                   <Text style={[styles.quickStatLabel, { color: labelColor }]}>{language === 'Tamil' ? 'தேதி' : 'Date'}</Text>
@@ -1948,23 +2144,7 @@ export default function ShopScreen() {
                 </View>
               </Animated.View>
 
-
-              {/* ── SHOP FOOTER BRANDING ── */}
-              <View style={[styles.invoiceFooterBranding, { marginTop: 10, paddingBottom: 10 }]}>
-                <Image
-                  source={require("../../src/assets/images/icon.png")}
-                  style={[styles.footerLogo, { width: 30, height: 30 }]}
-                />
-                <Text style={[styles.footerShopName, { color: textColor, fontSize: 14 }]}>
-                  {language === 'Tamil' ? 'சுஜி காய்கறி கடை' : 'SUJI VEGETABLES SHOP'}
-                </Text>
-                <Text style={[styles.footerShopLoc, { color: labelColor, fontSize: 10 }]}>
-                  {language === 'Tamil' ? 'பாண்டி - திண்டிவனம் மெயின் ரோடு, கிளியனூர்.' : 'Pondy - Tindivanam Road, Kiliyanur'}
-                </Text>
-                <Text style={[styles.footerShopContact, { color: labelColor, fontSize: 10 }]}>{user?.phone || "95856 50734"}</Text>
               </View>
-            </View>
-
             </ViewShot>
 
             {/* Sticky Professional Footer Actions - Moved inside ScrollView but outside ViewShot */}
@@ -1975,7 +2155,7 @@ export default function ShopScreen() {
                 { 
                   backgroundColor: cardBg, 
                   borderTopColor: borderCol,
-                  paddingBottom: verticalScale(20),
+                  paddingBottom: Math.max(verticalScale(20), insets.bottom + verticalScale(10)),
                   flexDirection: 'row',
                   gap: 12,
                   paddingHorizontal: 16,
@@ -1988,21 +2168,23 @@ export default function ShopScreen() {
                     styles.mainGenerateBtn, 
                     { 
                       backgroundColor: '#25D366', 
-                      flex: 0.6, 
+                      flex: 1, 
                       elevation: 4,
                       shadowColor: '#000',
                       shadowOffset: { width: 0, height: 2 },
                       shadowOpacity: 0.2,
                       shadowRadius: 4,
-                      paddingHorizontal: 8
+                      paddingHorizontal: scale(10),
+                      justifyContent: 'center',
+                      alignItems: 'center',
                     }
                   ]} 
                   onPress={handleShareImage}
                   activeOpacity={0.8}
                 >
-                    <View style={styles.generateBtnContent}>
-                      <Ionicons name="logo-whatsapp" size={20} color="#FFF" />
-                      <Text style={[styles.mainGenerateText, { fontWeight: '700', fontSize: 13 }]}>Share Bill</Text>
+                    <View style={[styles.generateBtnContent, { gap: scale(8) }]}>
+                      <Ionicons name="logo-whatsapp" size={22} color="#FFF" />
+                      <Text style={[styles.mainGenerateText, { fontWeight: '800', fontSize: moderateScale(13) }]}>Share Bill</Text>
                     </View>
                 </TouchableOpacity>
 
@@ -2017,13 +2199,15 @@ export default function ShopScreen() {
                       shadowOffset: { width: 0, height: 2 },
                       shadowOpacity: 0.2,
                       shadowRadius: 4,
-                      paddingHorizontal: 15
+                      paddingHorizontal: scale(10),
+                      justifyContent: 'center',
+                      alignItems: 'center',
                     }
                   ]} 
                   onPress={finalizeBill}
                   activeOpacity={0.8}
                 >
-                  <View style={styles.generateBtnContent}>
+                  <View style={[styles.generateBtnContent, { gap: scale(8) }]}>
                     <MaterialCommunityIcons name="printer-check" size={24} color="#FFF" />
                     <Text style={[styles.mainGenerateText, { fontSize: moderateScale(14) }]}>
                       {language === 'Tamil' ? `அச்சிடு (${printerPreference === '2inch' ? '2"' : '3"'})` : `Print (${printerPreference === '2inch' ? '2"' : '3"'})`}
@@ -2065,7 +2249,6 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: scale(30),
     overflow: 'hidden',
     elevation: 8,
-    shadowColor: '#FF8C00',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.15,
     shadowRadius: 20,
@@ -2087,11 +2270,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: verticalScale(4),
   },
-  statusDotHeader: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginRight: 6,
+  printerBadgeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: scale(6),
+    paddingVertical: verticalScale(2),
+    borderRadius: scale(12),
+    borderWidth: 1,
+    marginRight: scale(6),
+    gap: 3
+  },
+  printerBadgeText: {
+    fontSize: moderateScale(9),
+    fontWeight: '900',
   },
   shopSubtitle: {
     fontSize: moderateScale(12),
@@ -2196,7 +2387,6 @@ const styles = StyleSheet.create({
     width: scale(22),
     height: scale(22),
     borderRadius: scale(11),
-    backgroundColor: "#FF8C00",
     zIndex: 10,
     alignItems: "center",
     justifyContent: "center",
@@ -2598,10 +2788,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: scale(16),
-    backgroundColor: '#FF8C0008',
     borderRadius: scale(12),
     borderWidth: 1,
-    borderColor: '#FF8C0020',
   },
   totalLabel: {
     fontSize: moderateScale(14),
@@ -2618,7 +2806,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     elevation: 4,
-    shadowColor: "#FF8C00",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
@@ -3068,7 +3255,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: scale(20),
     elevation: 4,
-    shadowColor: '#FF8C00',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -3133,7 +3319,6 @@ const styles = StyleSheet.create({
   headerIndicator: {
     width: 4,
     height: 18,
-    backgroundColor: '#FF8C00',
     borderRadius: 2,
     marginRight: 8,
   },
@@ -3279,7 +3464,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     elevation: 4,
-    shadowColor: '#FF8C00',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -3304,7 +3488,6 @@ const styles = StyleSheet.create({
   paidText: {
     fontSize: moderateScale(10),
     fontWeight: '800',
-    color: '#FF8C00',
   },
   invoiceFooterBranding: {
     alignItems: 'center',

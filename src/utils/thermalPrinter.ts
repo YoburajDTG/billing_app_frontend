@@ -1,7 +1,9 @@
 import { Alert, Platform, NativeModules, PermissionsAndroid } from 'react-native';
+import { Storage, KEYS } from '../services/storage';
 
-const { BluetoothEscposPrinter, BluetoothManager } = NativeModules;
-const isPrinterAvailable = !!(BluetoothManager && BluetoothEscposPrinter);
+import { BluetoothEscposPrinter, BluetoothManager } from '@brooons/react-native-bluetooth-escpos-printer';
+
+export const isPrinterAvailable = !!(BluetoothManager && BluetoothEscposPrinter);
 
 export interface ReceiptItem {
     name: string;
@@ -21,7 +23,15 @@ export interface ReceiptData {
     discount?: number;
     customerName?: string;
     customerMobile?: string;
+    shopPhone?: string;
+    shopAddress?: string;
+    gstNumber?: string;
+    receivedAmount?: number;
+    balanceAmount?: number;
 }
+
+// 80mm (3 inch) printer usually has 48 characters width
+const COLUMN_WIDTH_80MM = 48;
 
 export const ThermalPrinter = {
     /**
@@ -50,146 +60,259 @@ export const ThermalPrinter = {
                 return granted === PermissionsAndroid.RESULTS.GRANTED;
             }
         } catch (err) {
-            console.warn(err);
+            console.warn('Permission request error:', err);
             return false;
         }
     },
 
     /**
-     * Scan for ALL available devices (paired and unpaired)
+     * Connect to a printer. If address is provided, connect to it.
+     * If no address, try connecting to the last used printer.
+     */
+    async connectPrinter(address?: string) {
+        if (!isPrinterAvailable) return { success: false, message: 'Printer module not available' };
+        
+        const targetAddress = address || await Storage.getItem(KEYS.LAST_PRINTER);
+        if (!targetAddress) return { success: false, message: 'No printer selected' };
+
+        try {
+            const isEnabled = await BluetoothManager.isBluetoothEnabled();
+            if (!isEnabled) {
+                return { success: false, message: 'Bluetooth is turned off' };
+            }
+
+            // Attempt connection with a small retry logic for stability
+            let result = null;
+            try {
+                result = await BluetoothManager.connect(targetAddress);
+            } catch (e) {
+                // Wait 1 second and retry once
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                result = await BluetoothManager.connect(targetAddress);
+            }
+            
+            // Save as last printer if successful
+            if (address) {
+                await Storage.setItem(KEYS.LAST_PRINTER, address);
+            }
+            
+            return { success: true, message: 'Connected successfully' };
+        } catch (error) {
+            console.error('Connection failed:', error);
+            return { 
+                success: false, 
+                message: 'Failed to connect. Please try pairing the printer in your Phone Settings first then try again.' 
+            };
+        }
+    },
+
+    /**
+     * Print a formatted invoice
+     */
+    async printInvoice(data: ReceiptData) {
+        if (!isPrinterAvailable) {
+            console.warn('Printer native module not available.');
+            return false;
+        }
+
+        try {
+            // 1. Ensure connected
+            const connection = await this.connectPrinter();
+            if (!connection.success) {
+                Alert.alert('Printer Error', connection.message);
+                return false;
+            }
+
+            // 2. Start Printing
+            // 80mm layout
+            const width = COLUMN_WIDTH_80MM;
+            const divider = '-'.repeat(width) + '\n';
+
+            await BluetoothEscposPrinter.printerAlign(1); // CENTER
+            await BluetoothEscposPrinter.setBlob(1); // Bold
+            await BluetoothEscposPrinter.printText(`${data.shopName}\n`, {
+                widthtimes: 1, // Double width for shop name
+                heigthtimes: 1,
+            });
+            await BluetoothEscposPrinter.setBlob(0);
+            
+            if (data.shopAddress) {
+                await BluetoothEscposPrinter.printText(`${data.shopAddress}\n`, {});
+            }
+            if (data.shopPhone) {
+                await BluetoothEscposPrinter.printText(`Phone: ${data.shopPhone}\n`, {});
+            }
+            if (data.gstNumber) {
+                await BluetoothEscposPrinter.printText(`GST: ${data.gstNumber}\n`, {});
+            }
+            
+            await BluetoothEscposPrinter.printText(divider, {});
+
+            await BluetoothEscposPrinter.printerAlign(0); // LEFT
+            // Bill Info Line
+            const dateStr = `Date: ${data.date}`;
+            const billStr = `Bill: ${data.billId}`;
+            const infoLine = dateStr + ' '.repeat(width - dateStr.length - billStr.length) + billStr + '\n';
+            await BluetoothEscposPrinter.printText(infoLine, {});
+
+            if (data.customerName) {
+                await BluetoothEscposPrinter.printText(`Customer: ${data.customerName}\n`, {});
+            }
+            if (data.customerMobile) {
+                await BluetoothEscposPrinter.printText(`Mobile  : ${data.customerMobile}\n`, {});
+            }
+            
+            await BluetoothEscposPrinter.printText(divider, {});
+
+            // Table Header: Item (24), Qty (8), Rate (8), Total (8) -> 48 chars
+            const header = 'Item'.padEnd(24) + 'Qty'.padStart(8) + 'Rate'.padStart(8) + 'Total'.padStart(8) + '\n';
+            await BluetoothEscposPrinter.printText(header, {});
+            await BluetoothEscposPrinter.printText(divider, {});
+
+            for (const item of data.items) {
+                // Handle long item names by wrapping or truncating
+                const name = item.name.length > 23 ? item.name.substring(0, 23) : item.name;
+                const qtyLine = name.padEnd(24) + 
+                               item.quantity.toString().padStart(8) + 
+                               item.unitPrice.toFixed(2).padStart(8) + 
+                               item.totalPrice.toFixed(2).padStart(8) + '\n';
+                
+                await BluetoothEscposPrinter.printText(qtyLine, {});
+            }
+
+            await BluetoothEscposPrinter.printText(divider, {});
+
+            // Summary
+            await BluetoothEscposPrinter.printerAlign(2); // RIGHT
+            const totalText = `GRAND TOTAL: Rs. ${data.totalAmount.toFixed(2)}`;
+            await BluetoothEscposPrinter.setBlob(1);
+            await BluetoothEscposPrinter.printText(`${totalText}\n`, {
+                widthtimes: 0,
+                heigthtimes: 0,
+            });
+            await BluetoothEscposPrinter.setBlob(0);
+
+            if (data.receivedAmount !== undefined) {
+                await BluetoothEscposPrinter.printText(`Received: Rs. ${data.receivedAmount.toFixed(2)}\n`, {});
+                await BluetoothEscposPrinter.printText(`Balance : Rs. ${data.balanceAmount?.toFixed(2) || '0.00'}\n`, {});
+            }
+
+            await BluetoothEscposPrinter.printText('\n', {});
+            await BluetoothEscposPrinter.printerAlign(1); // CENTER
+            await BluetoothEscposPrinter.printText('Thank you! Visit Again\n', {});
+            await BluetoothEscposPrinter.printText('Powered by VegBilling App\n', {});
+            
+            // Feed and Cut
+            await BluetoothEscposPrinter.printText('\n\n\n', {});
+            await BluetoothEscposPrinter.printText('\x1dV\x42\x00', {}); // Cut command
+
+            return true;
+        } catch (error) {
+            console.error('Print failed:', error);
+            Alert.alert('Print Error', 'Printing failed. Please check connection and try again.');
+            return false;
+        }
+    },
+
+    /**
+     * Logic to be called after invoice save
+     */
+    async autoPrintAfterSave(data: ReceiptData) {
+        const isAutoPrintEnabled = await Storage.getItem(KEYS.AUTO_PRINT);
+        if (isAutoPrintEnabled) {
+            return await this.printInvoice(data);
+        }
+        return false;
+    },
+
+    /**
+     * Discover Bluetooth devices
      */
     async discoverDevices() {
         if (!isPrinterAvailable || Platform.OS !== 'android') return [];
         
-        const hasPermission = await this.requestPermissions();
-        if (!hasPermission) return [];
-
         try {
-            // scanDevices returns a JSON string with found devices
-            const devices = await BluetoothManager.scanDevices();
-            const parsed = JSON.parse(devices);
-            // Combine found and paired for a better UX
+            const hasPermission = await this.requestPermissions();
+            if (!hasPermission) return [];
+
+            // Get paired devices FIRST (instantly)
             const paired = await this.getPairedDevices();
             
-            // Filter unique devices by address
-            const allDevices = [...paired];
-            const found = parsed.found || [];
+            // Start scanning for NEW devices
+            const scanResult = await BluetoothManager.scanDevices();
+            let found = [];
             
-            found.forEach((d: any) => {
-                if (!allDevices.find(a => a.address === d.address)) {
-                    allDevices.push(d);
+            try {
+                // The scanResult is usually a JSON string
+                const parsed = typeof scanResult === 'string' ? JSON.parse(scanResult) : scanResult;
+                found = parsed.found || [];
+            } catch (e) {
+                console.warn('Error parsing scan result:', e);
+            }
+
+            // Combine and format
+            const allDevices = [...paired];
+            
+            found.forEach((dev: any) => {
+                const device = typeof dev === 'string' ? JSON.parse(dev) : dev;
+                if (!allDevices.some(d => d.address === device.address)) {
+                    allDevices.push({
+                        name: device.name || 'Unknown Device',
+                        address: device.address,
+                        type: 'found'
+                    });
                 }
             });
-            
+
             return allDevices;
         } catch (error) {
-            console.error('Error scanning devices:', error);
+            console.error('Discovery failed:', error);
+            // Fallback to just paired devices if scan fails
             return await this.getPairedDevices();
         }
     },
 
     /**
-     * Connect to a specific device by address
+     * Get paired devices
      */
-    async connect(address: string) {
-        if (!isPrinterAvailable) return false;
+    async getPairedDevices() {
+        if (!isPrinterAvailable || Platform.OS !== 'android') return [];
         try {
-            await BluetoothManager.connect(address);
-            return true;
+            const response = await BluetoothManager.getPairedDevices();
+            const devices = typeof response === 'string' ? JSON.parse(response) : response;
+            
+            return (devices || []).map((d: any) => ({
+                name: d.name || 'Unknown Device',
+                address: d.address,
+                type: 'paired'
+            }));
         } catch (error) {
-            console.error('Connection failed:', error);
-            return false;
+            console.error('Error getting paired devices:', error);
+            return [];
         }
     },
 
     /**
-     * Check if Bluetooth is enabled
+     * Print a test page
      */
-    async isBluetoothEnabled() {
-        if (!isPrinterAvailable) return false;
+    async testPrint() {
+        if (!isPrinterAvailable) return;
         try {
-            return await BluetoothManager.isBluetoothEnabled();
-        } catch (error) {
-            console.error('Error checking bluetooth:', error);
-            return false;
-        }
-    },
-
-    /**
-     * Format and print receipt for 8mm (3 inch) paper
-     */
-    async printReceipt(data: ReceiptData) {
-        if (!isPrinterAvailable) {
-            console.warn('Printer native module not available. This is normal in Expo Go.');
-            return;
-        }
-        try {
-            const isEnabled = await this.isBluetoothEnabled();
-            if (!isEnabled) {
-                Alert.alert('Bluetooth Off', 'Please turn on Bluetooth to print.');
+            const connection = await this.connectPrinter();
+            if (!connection.success) {
+                Alert.alert('Error', connection.message);
                 return;
             }
 
-            // If not connected, we might need to auto-connect to the last used printer
-            // For now, assume connection is handled by a settings screen or auto-select first paired
-            
-            // ESC/POS Commands
-            await BluetoothEscposPrinter.printerAlign(1); // CENTER
-            await BluetoothEscposPrinter.setBlob(1); // Bold
-            await BluetoothEscposPrinter.printText(`${data.shopName}\n`, {
-                encoding: 'GBK',
-                codepage: 0,
-                widthtimes: 1,
-                heigthtimes: 1,
-                fonttype: 0
-            });
-            await BluetoothEscposPrinter.setBlob(0);
-            await BluetoothEscposPrinter.printText('--------------------------------\n', {});
-
-            await BluetoothEscposPrinter.printerAlign(0); // LEFT
-            await BluetoothEscposPrinter.printText(`Date: ${data.date}\n`, {});
-            await BluetoothEscposPrinter.printText(`Bill No: ${data.billId}\n`, {});
-            if (data.customerName) {
-                await BluetoothEscposPrinter.printText(`Cust: ${data.customerName}\n`, {});
-            }
-            await BluetoothEscposPrinter.printText('--------------------------------\n', {});
-
-            // Header for items
-            // 80mm printer usually has ~48 characters per line
-            // Name (left) -> 30 chars, Total (right) -> 18 chars
-            await BluetoothEscposPrinter.printText('Item                 Qty    Price\n', {});
-            await BluetoothEscposPrinter.printText('--------------------------------\n', {});
-
-            for (const item of data.items) {
-                const name = item.name.substring(0, 20);
-                const qty = item.quantity.toString().padEnd(6);
-                const price = item.totalPrice.toFixed(2).padStart(8);
-                
-                await BluetoothEscposPrinter.printText(`${name.padEnd(20)}${qty}${price}\n`, {});
-                
-                // If there's a Tamil name, we might want to print it too
-                // Note: Standard ESC/POS doesn't support Tamil fonts well. 
-                // Advanced users print Tamil as an Image/Bitmap.
-            }
-
-            await BluetoothEscposPrinter.printText('--------------------------------\n', {});
-            await BluetoothEscposPrinter.printerAlign(2); // RIGHT
-            await BluetoothEscposPrinter.setBlob(1);
-            await BluetoothEscposPrinter.printText(`TOTAL: Rs.${data.totalAmount.toFixed(2)}\n`, {
-                widthtimes: 1,
-                heigthtimes: 1,
-            });
-            await BluetoothEscposPrinter.setBlob(0);
-            
-            await BluetoothEscposPrinter.printerAlign(1); // CENTER
-            await BluetoothEscposPrinter.printText('\nThank you! Visit Again\n\n\n', {});
-            
-            // Cut paper
-            await BluetoothEscposPrinter.printText('\x1dV\x42\x00', {}); // Standard Cut command (GS V m n)
-
-        } catch (error) {
-            console.error('Printing error:', error);
-            Alert.alert('Printer Error', 'Failed to print the bill. Please check printer connection.');
+            await BluetoothEscposPrinter.printerAlign(1);
+            await BluetoothEscposPrinter.printText('--- TEST PRINT ---\n', {});
+            await BluetoothEscposPrinter.printText('Printer is working correctly!\n', {});
+            await BluetoothEscposPrinter.printText('80mm / 3 inch Support\n', {});
+            await BluetoothEscposPrinter.printText('------------------\n', {});
+            await BluetoothEscposPrinter.printText('\n\n\n', {});
+            await BluetoothEscposPrinter.printText('\x1dV\x42\x00', {});
+        } catch (e) {
+            console.error(e);
         }
     }
 };

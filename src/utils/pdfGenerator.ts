@@ -88,9 +88,9 @@ export const generateBillPDF = async (data: BillData, options: { printDirect?: b
       </head>
       <body>
         <div class="header">
-          <div class="shop-name">சுஜி காய்கறி கடை</div>
+          <div class="shop-name">${data.shopName || "சுஜி காய்கறி கடை"}</div>
           <div class="shop-info">
-            பாண்டி - திண்டிவனம் மெயின் ரோடு, கிளியனூர்.<br/>
+            ${data.address || "பாண்டி - திண்டிவனம் மெயின் ரோடு, கிளியனூர்."}<br/>
             Cell: ${data.phone || '9095938085'}
           </div>
         </div>

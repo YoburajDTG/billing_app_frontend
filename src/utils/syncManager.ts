@@ -10,17 +10,19 @@ export const SyncManager = {
         try {
             // Convert UI bill data to database format
             const billPayload = {
-                total_amount: billData.grandTotal || 0,
+                total_amount: billData.total_amount || billData.grandTotal || 0,
                 discount: billData.discount || 0,
-                customer_name: billData.userName || 'Guest',
+                customer_name: billData.customer_name || billData.userName || 'Guest',
+                customer_mobile: billData.customer_mobile || billData.customerPhone || '',
                 mode: billData.mode || 'Retail',
+                payment_status: billData.payment_status || 'PAID',
                 items: billData.items.map((item: any) => ({
-                    vegetable_id: item.id,
+                    vegetable_id: item.vegetable_id || item.id,
                     name: item.name,
-                    tamil_name: item.tamilName,
+                    tamil_name: item.tamilName || item.tamil_name,
                     quantity: item.quantity,
-                    unit_price: item.price,
-                    total_price: item.total,
+                    unit_price: item.unit_price || item.price,
+                    total_price: item.total_price || item.total,
                     unit: 'kg'
                 }))
             };

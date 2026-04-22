@@ -5,7 +5,7 @@ import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ShopLayout() {
-    const { isDark, language } = useAppTheme();
+    const { isDark, language, primaryColor } = useAppTheme();
     const insets = useSafeAreaInsets();
 
     return (
@@ -24,7 +24,7 @@ export default function ShopLayout() {
                     shadowOpacity: 0.1,
                     shadowRadius: 20,
                 },
-                tabBarActiveTintColor: '#FF8C00',
+                tabBarActiveTintColor: primaryColor,
                 tabBarInactiveTintColor: isDark ? '#555' : '#94A3B8',
                 tabBarLabelStyle: {
                     fontSize: 10,

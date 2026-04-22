@@ -19,7 +19,7 @@ export default function CustomersScreen() {
     const [phone, setPhone] = useState('');
     const [address, setAddress] = useState('');
     const [mobileError, setMobileError] = useState(false);
-    const { isDark, language } = useAppTheme();
+    const { isDark, language, primaryColor } = useAppTheme();
     const insets = useSafeAreaInsets();
     const router = useRouter();
 
@@ -126,7 +126,6 @@ export default function CustomersScreen() {
     const cardBg = isDark ? '#1E1E1E' : '#FFFFFF';
     const textColor = isDark ? '#FFF' : '#1E293B';
     const subTextColor = isDark ? '#94A3B8' : '#64748B';
-    const primaryColor = '#FF8C00';
 
     const renderItem = ({ item, index }: { item: Customer, index: number }) => (
         <Animated.View 
@@ -167,23 +166,26 @@ export default function CustomersScreen() {
 
     return (
         <View style={[styles.container, { backgroundColor: background }]}>
-            <StatusBar style="light" backgroundColor="#FF8C00" />
+            <StatusBar style="light" backgroundColor={primaryColor} />
             
             <LinearGradient
-                colors={isDark ? ['#1A1A1A', '#1A1A1A'] : ['#FF8C00', '#FF8C00']}
-                style={[styles.header, { paddingTop: insets.top + (Platform.OS === 'android' ? verticalScale(15) : verticalScale(10)) }]}
+                colors={isDark ? ['#1A1A1A', '#1A1A1A'] : [primaryColor, primaryColor]}
+                style={[styles.header, { 
+                    paddingTop: insets.top + (Platform.OS === 'android' ? verticalScale(15) : verticalScale(10)),
+                    shadowColor: primaryColor 
+                }]}
             >
                 <View style={styles.headerDecor} />
                 <View style={styles.headerTop}>
                     <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                        <Ionicons name="arrow-back" size={24} color="#FF8C00" />
+                        <Ionicons name="arrow-back" size={24} color={primaryColor} />
                     </TouchableOpacity>
                     <View style={{ flex: 1 }}>
                         <Text style={styles.headerTitle}>{language === 'Tamil' ? 'வாடிக்கையாளர்கள்' : 'Customer base'}</Text>
                         <Text style={styles.headerSubtitle}>{customers.length} {language === 'Tamil' ? 'மொத்த வாடிக்கையாளர்கள்' : 'total customers'}</Text>
                     </View>
                     <TouchableOpacity style={styles.addTrigger} onPress={openAddModal}>
-                        <Ionicons name="add" size={28} color="#FF8C00" />
+                        <Ionicons name="add" size={28} color={primaryColor} />
                     </TouchableOpacity>
                 </View>
             </LinearGradient>
@@ -285,7 +287,7 @@ export default function CustomersScreen() {
                             <TouchableOpacity style={[styles.sheetBtn, styles.closeSheetBtn]} onPress={() => setModalVisible(false)}>
                                 <Text style={[styles.closeSheetText, { color: subTextColor }]}>{language === 'Tamil' ? 'ரத்து' : 'Cancel'}</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={[styles.sheetBtn, styles.saveSheetBtn, { backgroundColor: primaryColor }]} onPress={handleSave}>
+                            <TouchableOpacity style={[styles.sheetBtn, styles.saveSheetBtn, { backgroundColor: primaryColor, shadowColor: primaryColor }]} onPress={handleSave}>
                                 <Text style={styles.saveSheetText}>{editingCustomer ? (language === 'Tamil' ? 'புதுப்பிக்கவும்' : 'Update') : (language === 'Tamil' ? 'பதிவு செய்' : 'Register')}</Text>
                             </TouchableOpacity>
                         </View>
@@ -305,7 +307,6 @@ const styles = StyleSheet.create({
         borderBottomRightRadius: scale(32),
         overflow: 'hidden',
         elevation: 8,
-        shadowColor: '#FF8C00',
         shadowOpacity: 0.2,
         shadowOffset: { width: 0, height: 10 },
         shadowRadius: 15,
@@ -438,7 +439,6 @@ const styles = StyleSheet.create({
     closeSheetBtn: { backgroundColor: 'transparent' },
     saveSheetBtn: { 
         elevation: 8,
-        shadowColor: '#FF8C00',
         shadowOpacity: 0.3,
         shadowRadius: 10,
         shadowOffset: { width: 0, height: 6 }

@@ -25,6 +25,7 @@ import {
 } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
 
 export default function BillingHistoryScreen() {
   const [history, setHistory] = useState<any[]>([]);
@@ -35,7 +36,7 @@ export default function BillingHistoryScreen() {
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedFilter, setSelectedFilter] = useState('Today');
   const [printerPreference, setPrinterPreference] = useState<'2inch' | '3inch'>('2inch');
-  const { isDark, language } = useAppTheme();
+  const { isDark, language, primaryColor } = useAppTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
@@ -80,6 +81,8 @@ export default function BillingHistoryScreen() {
         date: bill.created_at,
         grandTotal: bill.total_amount,
         itemCount: bill.itemCount || 0,
+        paymentStatus: bill.payment_status || 'PAID',
+        mode: bill.mode || 'Shop',
       }));
       setHistory(bills);
     } catch {
@@ -88,6 +91,12 @@ export default function BillingHistoryScreen() {
       setLoading(false);
     }
   }, [startDate, endDate, language, selectedFilter]);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchHistory();
+    }, [fetchHistory])
+  );
 
   useEffect(() => {
     fetchHistory();
@@ -261,13 +270,25 @@ export default function BillingHistoryScreen() {
     }
   };
 
-  const primaryColor = "#FF8C00";
+  const handleEditBill = (bill: any) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setPreviewVisible(false);
+    
+    const targetPath = bill.mode === 'Function' ? "/shop/function-bill" : "/shop";
+    
+    router.replace({
+        pathname: targetPath,
+        params: { waitBillId: bill.id }
+    });
+  };
+
+  const primaryColorLocal = primaryColor;
   const textColor = isDark ? "#F2F2F7" : "#1A1C1E";
   const labelColor = isDark ? "#8E8E93" : "#6B7280";
   const cardBg = isDark ? "#1C1C1E" : "#FFFFFF";
   const borderCol = isDark ? "#2C2C2E" : "#E5E7EB";
   const bg = isDark ? "#0F0F0F" : "#F0F2F5";
-  const heroBg = isDark ? "#1C1C1E" : "#FF8C00";
+  const heroBg = isDark ? "#1C1C1E" : primaryColor;
 
   const renderItem = ({ item, index }: { item: any; index: number }) => (
     <Animated.View
@@ -294,6 +315,14 @@ export default function BillingHistoryScreen() {
           <Text style={[styles.customerNameText, { color: labelColor }]}>
             {item.customerName}
           </Text>
+          {item.paymentStatus === 'WAITING' && (
+            <View style={[styles.waitingBadge, { backgroundColor: '#FF9800' }]}>
+              <MaterialCommunityIcons name="clock-outline" size={10} color="#FFF" />
+              <Text style={[styles.waitingBadgeText, { color: '#FFF' }]}>
+                {language === 'Tamil' ? 'காத்திருப்பு' : 'WAITING'}
+              </Text>
+            </View>
+          )}
         </View>
         <View style={styles.amountBadge}>
           <Text style={[styles.billAmount, { color: primaryColor }]}>
@@ -325,6 +354,21 @@ export default function BillingHistoryScreen() {
           </Text>
           <Ionicons name="chevron-forward" size={14} color={labelColor} />
         </TouchableOpacity>
+
+        {item.paymentStatus === 'WAITING' && (
+           <TouchableOpacity
+            style={[
+              styles.editBtnSmall,
+              { backgroundColor: primaryColor },
+            ]}
+            onPress={() => handleEditBill(item)}
+           >
+            <MaterialCommunityIcons name="pencil" size={14} color="#FFF" />
+            <Text style={styles.editBtnTextSmall}>
+                {language === 'Tamil' ? 'திருத்து' : 'Edit'}
+            </Text>
+           </TouchableOpacity>
+        )}
       </View>
     </Animated.View>
   );
@@ -334,7 +378,7 @@ export default function BillingHistoryScreen() {
 
       {/* Branded Dashboard Header */}
       <LinearGradient
-        colors={isDark ? ['#1A1A1A', '#1A1A1A'] : ['#FF8C00', '#FF8C00']}
+        colors={isDark ? ['#1A1A1A', '#1A1A1A'] : [primaryColor, primaryColor]}
         style={[
           styles.header,
           { paddingTop: insets.top + (Platform.OS === 'android' ? verticalScale(15) : verticalScale(10)) }
@@ -495,6 +539,14 @@ export default function BillingHistoryScreen() {
                 <Text style={[styles.modalSubtitle, { color: labelColor }]}>
                   {selectedBill && new Date(selectedBill.date).toLocaleString()}
                 </Text>
+                {selectedBill?.paymentStatus === 'WAITING' && (
+                  <View style={[styles.waitingBadge, { backgroundColor: '#FF9800', marginTop: 10, paddingHorizontal: 10, paddingVertical: 4 }]}>
+                    <MaterialCommunityIcons name="clock-outline" size={14} color="#FFF" />
+                    <Text style={[styles.waitingBadgeText, { color: '#FFF' }]}>
+                      {language === 'Tamil' ? 'காத்திருப்பு' : 'WAITING'}
+                    </Text>
+                  </View>
+                )}
               </View>
               <TouchableOpacity
                 style={[
@@ -656,7 +708,7 @@ export default function BillingHistoryScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.downloadBtn, { backgroundColor: primaryColor, flex: 1 }]}
+                style={[styles.downloadBtn, { backgroundColor: primaryColor, flex: 1, shadowColor: primaryColor }]}
                 onPress={() => handleDownloadPdf("")}
               >
                 <MaterialCommunityIcons
@@ -666,6 +718,16 @@ export default function BillingHistoryScreen() {
                 />
                 <Text style={styles.downloadBtnText}>PDF</Text>
               </TouchableOpacity>
+
+              {selectedBill?.paymentStatus === 'WAITING' && (
+                <TouchableOpacity
+                    style={[styles.downloadBtn, { backgroundColor: '#FF8C00', flex: 0.8 }]}
+                    onPress={() => handleEditBill(selectedBill)}
+                >
+                    <MaterialCommunityIcons name="pencil" size={20} color="#FFF" />
+                    <Text style={styles.downloadBtnText}>{language === 'Tamil' ? 'திருத்து' : 'Edit'}</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </View>
@@ -688,7 +750,6 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: scale(30),
     borderBottomRightRadius: scale(30),
     elevation: 8,
-    shadowColor: '#FF8C00',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.15,
     shadowRadius: 20,
@@ -757,13 +818,11 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#FF8C00',
     marginRight: 6,
   },
   liveText: {
     fontSize: moderateScale(10),
     fontWeight: '800',
-    color: '#FF8C00',
     letterSpacing: 0.5,
   },
   centered: {
@@ -1018,7 +1077,6 @@ const styles = StyleSheet.create({
     borderRadius: scale(20),
     gap: scale(10),
     elevation: 4,
-    shadowColor: '#FF8C00',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 10,
@@ -1057,5 +1115,37 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(11),
     fontWeight: '800',
     color: '#6B7280',
+  },
+  waitingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: scale(8),
+    paddingVertical: verticalScale(2),
+    borderRadius: scale(6),
+    marginTop: 4,
+    gap: 4,
+  },
+  waitingBadgeText: {
+    fontSize: moderateScale(10),
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  editBtnSmall: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: verticalScale(6),
+    paddingHorizontal: scale(12),
+    borderRadius: scale(10),
+    gap: 4,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  editBtnTextSmall: {
+    fontSize: moderateScale(12),
+    fontWeight: "800",
+    color: "#FFF",
   },
 });

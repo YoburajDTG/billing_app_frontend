@@ -13,30 +13,39 @@ import {
     View,
     ActivityIndicator,
     Platform,
-    NativeModules
+    Switch,
+    FlatList
 } from 'react-native';
-import { ThermalPrinter } from '@/utils/thermalPrinter';
+import { ThermalPrinter, isPrinterAvailable } from '@/utils/thermalPrinter';
 import * as ImagePicker from 'expo-image-picker';
-import { useAppTheme } from '@/context/ThemeContext';
+import { useAppTheme, THEME_COLORS } from '@/context/ThemeContext';
 import { KEYS, Storage } from '@/services/storage';
 import { moderateScale, scale, verticalScale } from '@/utils/responsive';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { sqliteService } from '@/database/sqlite';
 
 export default function MerchantProfileScreen() {
-    const { isDark, language, toggleTheme, toggleLanguage } = useAppTheme();
+    const { isDark, language, toggleTheme, toggleLanguage, primaryColor, setPrimaryColor } = useAppTheme();
     const router = useRouter();
     const insets = useSafeAreaInsets();
     
-    const [merchantAddress, setMerchantAddress] = useState('');
-    const [printerStatus, setPrinterStatus] = useState(language === 'Tamil' ? 'இணைக்கப்படவில்லை' : 'Not Connected');
-    const [isPrinterConnected, setIsPrinterConnected] = useState(false);
-    const [loading, setLoading] = useState(false);
+    // Merchant States
     const [merchantName, setMerchantName] = useState('');
     const [merchantLogo, setMerchantLogo] = useState('');
     const [merchantNumber, setMerchantNumber] = useState('');
+    const [merchantAddress, setMerchantAddress] = useState('');
     const [mobileError, setMobileError] = useState(false);
-    const [printerSize, setPrinterSize] = useState<'2inch' | '3inch'>('2inch');
+    const [loading, setLoading] = useState(false);
+
+    // Printer States
+    const [printerStatus, setPrinterStatus] = useState(language === 'Tamil' ? 'இணைக்கப்படவில்லை' : 'Not Connected');
+    const [isPrinterConnected, setIsPrinterConnected] = useState(false);
+    const [printerSize, setPrinterSize] = useState<'2inch' | '3inch'>('3inch');
+    const [isAutoPrint, setIsAutoPrint] = useState(false);
+    const [pairedDevices, setPairedDevices] = useState<any[]>([]);
+    const [isScanning, setIsScanning] = useState(false);
+    const [showDeviceList, setShowDeviceList] = useState(false);
 
     useEffect(() => {
         loadProfile();
@@ -45,13 +54,14 @@ export default function MerchantProfileScreen() {
     const loadProfile = async () => {
         setLoading(true);
         try {
-            const [mName, mLogo, mNumber, pSize, mAddr, lastPrinter] = await Promise.all([
+            const [mName, mLogo, mNumber, pSize, mAddr, lastPrinter, autoPrint] = await Promise.all([
                 Storage.getItem(KEYS.MERCHANT_NAME),
                 Storage.getItem(KEYS.MERCHANT_LOGO),
                 Storage.getItem(KEYS.MERCHANT_NUMBER),
                 Storage.getItem(KEYS.PRINTER_SIZE),
-                Storage.getItem('merchant_address'),
-                Storage.getItem('last_printer')
+                Storage.getItem(KEYS.MERCHANT_ADDRESS),
+                Storage.getItem(KEYS.LAST_PRINTER),
+                Storage.getItem(KEYS.AUTO_PRINT)
             ]);
 
             if (mName) setMerchantName(mName);
@@ -59,10 +69,19 @@ export default function MerchantProfileScreen() {
             if (mNumber) setMerchantNumber(mNumber);
             if (pSize) setPrinterSize(pSize);
             if (mAddr) setMerchantAddress(mAddr);
+            if (autoPrint !== null) setIsAutoPrint(autoPrint);
             
             if (lastPrinter) {
-                setPrinterStatus(lastPrinter.name || lastPrinter.address);
-                setIsPrinterConnected(true);
+                // Try connecting in the background
+                setPrinterStatus(language === 'Tamil' ? 'மீண்டும் இணைக்கிறது...' : 'Reconnecting...');
+                const conn = await ThermalPrinter.connectPrinter(lastPrinter);
+                if (conn.success) {
+                    setPrinterStatus(lastPrinter.name || lastPrinter.address);
+                    setIsPrinterConnected(true);
+                } else {
+                    setPrinterStatus(language === 'Tamil' ? 'இணைப்பு தோல்வி' : 'Connection Failed');
+                    setIsPrinterConnected(false);
+                }
             }
         } catch (error) {
             console.error('Error loading profile:', error);
@@ -71,27 +90,54 @@ export default function MerchantProfileScreen() {
         }
     };
 
-    const scanAndConnectPrinter = async () => {
+    const scanDevices = async () => {
+        if (!isPrinterAvailable) {
+            Alert.alert('Info', 'Printer module only works on physical Android devices');
+            return;
+        }
+        setIsScanning(true);
         try {
-            setPrinterStatus(language === 'Tamil' ? 'தேடுகிறது...' : 'Scanning...');
             const devices = await ThermalPrinter.discoverDevices();
-            if (devices && devices.length > 0) {
-                const printer = devices[0];
-                const success = await ThermalPrinter.connect(printer.address);
-                if (success) {
-                    await Storage.setItem('last_printer', printer);
-                    setPrinterStatus(printer.name || printer.address);
-                    setIsPrinterConnected(true);
-                    Alert.alert(language === 'Tamil' ? 'வெற்றி' : 'Success', language === 'Tamil' ? 'பிரிண்டர் இணைக்கப்பட்டது!' : 'Printer connected!');
-                }
+            setPairedDevices(devices);
+            setShowDeviceList(true);
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setIsScanning(false);
+        }
+    };
+
+    const connectToPrinter = async (device: any) => {
+        setLoading(true);
+        setShowDeviceList(false);
+        setPrinterStatus(language === 'Tamil' ? 'இணைக்கிறது...' : 'Connecting...');
+        
+        try {
+            const res = await ThermalPrinter.connectPrinter(device.address);
+            if (res.success) {
+                setPrinterStatus(device.name || device.address);
+                setIsPrinterConnected(true);
+                Alert.alert(language === 'Tamil' ? 'வெற்றி' : 'Success', language === 'Tamil' ? 'பிரிண்டர் இணைக்கப்பட்டது!' : 'Printer connected!');
             } else {
-                setPrinterStatus(language === 'Tamil' ? 'பிரிண்டர் கிடைக்கவில்லை' : 'No printer found');
+                setPrinterStatus(language === 'Tamil' ? 'தோல்வி' : 'Failed');
                 setIsPrinterConnected(false);
+                Alert.alert('Error', res.message);
             }
         } catch (err) {
             setPrinterStatus(language === 'Tamil' ? 'பிழை' : 'Error');
             setIsPrinterConnected(false);
+        } finally {
+            setLoading(false);
         }
+    };
+
+    const toggleAutoPrint = async (value: boolean) => {
+        setIsAutoPrint(value);
+        await Storage.setItem(KEYS.AUTO_PRINT, value);
+    };
+
+    const handleTestPrint = async () => {
+        await ThermalPrinter.testPrint();
     };
 
     const isValidMobile = (num: string) => /^[6-9]\d{9}$/.test(num.trim());
@@ -135,10 +181,7 @@ export default function MerchantProfileScreen() {
         }
 
         if (merchantNumber.trim() && !isValidMobile(merchantNumber)) {
-            Alert.alert(
-                language === 'Tamil' ? 'பிழை' : "Invalid Mobile", 
-                language === 'Tamil' ? 'சரியான 10 இலக்க எண்ணை உள்ளிடவும்' : "Please enter a valid 10-digit mobile number"
-            );
+            Alert.alert(language === 'Tamil' ? 'பிழை' : "Invalid Mobile", language === 'Tamil' ? 'சரியான 10 இலக்க எண்ணை உள்ளிடவும்' : "Please enter a valid 10-digit mobile number");
             setMobileError(true);
             return;
         }
@@ -150,7 +193,7 @@ export default function MerchantProfileScreen() {
                 Storage.setItem(KEYS.MERCHANT_LOGO, merchantLogo),
                 Storage.setItem(KEYS.MERCHANT_NUMBER, merchantNumber),
                 Storage.setItem(KEYS.PRINTER_SIZE, printerSize),
-                Storage.setItem('merchant_address', merchantAddress)
+                Storage.setItem(KEYS.MERCHANT_ADDRESS, merchantAddress)
             ]);
 
             Alert.alert(language === 'Tamil' ? 'வெற்றி' : "Success", language === 'Tamil' ? 'விவரங்கள் சேமிக்கப்பட்டன!' : "Profile updated successfully!");
@@ -162,7 +205,45 @@ export default function MerchantProfileScreen() {
         }
     };
 
-    const primaryColor = '#FF8C00';
+    const handleResetData = async (type: 'today' | 'month') => {
+        const title = language === 'Tamil' ? 'தரவை மீட்டமை' : 'Reset Data';
+        const message = type === 'today' 
+            ? (language === 'Tamil' ? 'இன்றைய விற்பனை முழுவதையும் அழிக்க விரும்புகிறீர்களா?' : 'Are you sure you want to clear all of today\'s sales?')
+            : (language === 'Tamil' ? 'இந்த மாத விற்பனை முழுவதையும் அழிக்க விரும்புகிறீர்களா?' : 'Are you sure you want to clear all sales for this month?');
+        
+        Alert.alert(
+            title,
+            message,
+            [
+                { text: language === 'Tamil' ? 'இல்லை' : 'Cancel', style: 'cancel' },
+                { 
+                    text: language === 'Tamil' ? 'ஆம்' : 'Yes, Reset', 
+                    style: 'destructive',
+                    onPress: async () => {
+                        setLoading(true);
+                        try {
+                            const today = new Date().toISOString().split('T')[0];
+                            const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+                            
+                            if (type === 'today') {
+                                await sqliteService.execute(`DELETE FROM bills WHERE created_at LIKE ?`, [`${today}%`]);
+                            } else {
+                                await sqliteService.execute(`DELETE FROM bills WHERE created_at >= ?`, [monthStart]);
+                            }
+                            
+                            Alert.alert(language === 'Tamil' ? 'வெற்றி' : 'Success', language === 'Tamil' ? 'தரவு அழிக்கப்பட்டது!' : 'Data cleared successfully!');
+                        } catch (error) {
+                            console.error(error);
+                            Alert.alert('Error', 'Failed to reset data');
+                        } finally {
+                            setLoading(false);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
     const background = isDark ? '#0F0F0F' : '#F8FAFC';
     const cardBg = isDark ? '#1E1E1E' : '#FFFFFF';
     const textColor = isDark ? '#FFF' : '#1E293B';
@@ -170,16 +251,15 @@ export default function MerchantProfileScreen() {
 
     return (
         <View style={[styles.container, { backgroundColor: background }]}>
-            <StatusBar style="light" backgroundColor="#FF8C00" />
+            <StatusBar style="light" backgroundColor={primaryColor} />
             
             <LinearGradient
-                colors={['#FF8C00', '#FF8C00']}
+                colors={[primaryColor, primaryColor]}
                 style={[styles.header, { paddingTop: insets.top + (Platform.OS === 'android' ? verticalScale(10) : verticalScale(8)) }]}
             >
-                <View style={styles.headerDecor} />
                 <View style={styles.headerTop}>
                     <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                        <Ionicons name="arrow-back" size={24} color="#FF8C00" />
+                        <Ionicons name="arrow-back" size={24} color={'#FFF'} />
                     </TouchableOpacity>
                     <View style={{ flex: 1 }}>
                         <Text style={styles.headerTitle}>{language === 'Tamil' ? 'கடை விவரம்' : 'Shop Profile'}</Text>
@@ -196,7 +276,7 @@ export default function MerchantProfileScreen() {
                     <View style={styles.inputWrapper}>
                         <Text style={[styles.inputLabel, { color: subTextColor }]}>{language === 'Tamil' ? 'கடை பெயர்' : 'Shop Name'}</Text>
                         <TextInput
-                            style={[styles.input, { color: textColor, borderColor: isDark ? '#333' : '#E2E8F0', backgroundColor: isDark ? '#2C2C2C' : '#F8FAFC' }]}
+                            style={[styles.input, { color: textColor, borderColor: isDark ? '#333' : '#E2E8F0', backgroundColor: isDark ? '#2C2C2E' : '#F8FAFC' }]}
                             value={merchantName}
                             onChangeText={setMerchantName}
                             placeholder={language === 'Tamil' ? 'எ.கா. சுஜி காய்கறி கடை' : "e.g. Suji Vegetables"}
@@ -207,14 +287,7 @@ export default function MerchantProfileScreen() {
                     <View style={styles.inputWrapper}>
                         <Text style={[styles.inputLabel, { color: subTextColor }]}>{language === 'Tamil' ? 'தொடர்பு எண்' : 'Contact Number'}</Text>
                         <TextInput
-                            style={[
-                                styles.input, 
-                                { 
-                                    color: textColor, 
-                                    borderColor: mobileError ? '#EF4444' : (isDark ? '#333' : '#E2E8F0'), 
-                                    backgroundColor: isDark ? '#2C2C2C' : '#F8FAFC' 
-                                }
-                            ]}
+                            style={[styles.input, { color: textColor, borderColor: mobileError ? '#EF4444' : (isDark ? '#333' : '#E2E8F0'), backgroundColor: isDark ? '#2C2C2E' : '#F8FAFC' }]}
                             value={merchantNumber}
                             onChangeText={handleMobileChange}
                             placeholder={language === 'Tamil' ? '90959 38085' : "e.g. 90959 38085"}
@@ -222,17 +295,12 @@ export default function MerchantProfileScreen() {
                             keyboardType="phone-pad"
                             maxLength={10}
                         />
-                        {mobileError && (
-                            <Text style={styles.errorText}>
-                                {language === 'Tamil' ? 'சரியான 10 இலக்க எண்ணை உள்ளிடவும்' : 'Enter valid 10-digit number'}
-                            </Text>
-                        )}
                     </View>
 
                     <View style={styles.inputWrapper}>
                         <Text style={[styles.inputLabel, { color: subTextColor }]}>{language === 'Tamil' ? 'கடை முகவரி' : 'Shop Address'}</Text>
                         <TextInput
-                            style={[styles.input, { height: verticalScale(60), textAlignVertical: 'top', paddingTop: 10, color: textColor, borderColor: isDark ? '#333' : '#E2E8F0', backgroundColor: isDark ? '#2C2C2C' : '#F8FAFC' }]}
+                            style={[styles.input, { height: verticalScale(60), textAlignVertical: 'top', paddingTop: 10, color: textColor, borderColor: isDark ? '#333' : '#E2E8F0', backgroundColor: isDark ? '#2C2C2E' : '#F8FAFC' }]}
                             value={merchantAddress}
                             onChangeText={setMerchantAddress}
                             placeholder={language === 'Tamil' ? 'எ.கா. மெயின் ரோடு, சென்னை' : "e.g. Main Road, Chennai"}
@@ -243,48 +311,37 @@ export default function MerchantProfileScreen() {
                     </View>
                 </View>
 
-                {/* Business Management Card */}
+                {/* Printer Settings Card */}
                 <View style={[styles.card, { backgroundColor: cardBg }]}>
-                    <Text style={[styles.sectionCardTitle, { color: textColor }]}>
-                        {language === 'Tamil' ? 'வணிக மேலாண்மை' : 'Business Management'}
-                    </Text>
-
-                    <TouchableOpacity 
-                        style={styles.menuListItem}
-                        onPress={() => router.push('/shop/customers')}
-                        activeOpacity={0.7}
-                    >
-                        <View style={[styles.menuIconBox, { backgroundColor: '#3B82F615' }]}>
-                            <Ionicons name="people" size={20} color="#3B82F6" />
-                        </View>
-                        <Text style={[styles.menuListText, { color: textColor }]}>
-                            {language === 'Tamil' ? 'வாடிக்கையாளர் விவரங்கள்' : 'Manage Customers'}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                        <Text style={[styles.sectionCardTitle, { color: textColor, marginBottom: 0 }]}>
+                            {language === 'Tamil' ? 'பிரிண்டர் அமைப்புகள்' : 'Printer Settings'}
                         </Text>
-                        <Feather name="chevron-right" size={18} color={subTextColor} />
-                    </TouchableOpacity>
+                        {isPrinterConnected && (
+                            <TouchableOpacity onPress={handleTestPrint} style={styles.testBtn}>
+                                <Text style={styles.testBtnText}>{language === 'Tamil' ? 'பரிசோதனை' : 'Test Print'}</Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
+
+                    <View style={styles.settingRow}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={[styles.settingLabel, { color: textColor }]}>
+                                {language === 'Tamil' ? 'தானியங்கி பிரிண்ட்' : 'Auto Print After Save'}
+                            </Text>
+                            <Text style={[styles.settingHint, { color: subTextColor }]}>
+                                {language === 'Tamil' ? 'சேமித்தவுடன் தானாக பிரிண்ட் செய்ய' : 'Print instantly after saving invoice'}
+                            </Text>
+                        </View>
+                        <Switch
+                            value={isAutoPrint}
+                            onValueChange={toggleAutoPrint}
+                            trackColor={{ false: '#767577', true: primaryColor + '80' }}
+                            thumbColor={isAutoPrint ? primaryColor : '#f4f3f4'}
+                        />
+                    </View>
 
                     <View style={styles.menuDivider} />
-
-                    <TouchableOpacity 
-                        style={styles.menuListItem}
-                        onPress={() => router.push('/shop/prices')}
-                        activeOpacity={0.7}
-                    >
-                        <View style={[styles.menuIconBox, { backgroundColor: '#FF8C0015' }]}>
-                            <Ionicons name="pricetag" size={20} color="#FF8C00" />
-                        </View>
-                        <Text style={[styles.menuListText, { color: textColor }]}>
-                            {language === 'Tamil' ? 'விலை நிர்ணயம்' : 'Set Daily Prices'}
-                        </Text>
-                        <Feather name="chevron-right" size={18} color={subTextColor} />
-                    </TouchableOpacity>
-                </View>
-
-                {/* Hardware Settings Card */}
-                <View style={[styles.card, { backgroundColor: cardBg }]}>
-                    <Text style={[styles.sectionCardTitle, { color: textColor }]}>
-                        {language === 'Tamil' ? 'பிரிண்டர் மற்றும் ஹார்டுவேர்' : 'Printer & Hardware'}
-                    </Text>
 
                     <View style={styles.inputWrapper}>
                         <Text style={[styles.inputLabel, { color: subTextColor }]}>{language === 'Tamil' ? 'பிரிண்டர் அளவு' : 'Default Printer Size'}</Text>
@@ -311,122 +368,106 @@ export default function MerchantProfileScreen() {
                             <Text style={[styles.settingLabel, { color: textColor }]}>
                                 {language === 'Tamil' ? 'ப்ளூடூத் பிரிண்டர்' : 'Bluetooth Printer'}
                             </Text>
-                            <Text style={[styles.settingHint, { color: isPrinterConnected ? '#FF8C00' : subTextColor }]}>
+                            <Text style={[styles.settingHint, { color: isPrinterConnected ? primaryColor : '#FF4444' }]}>
                                 {printerStatus}
                             </Text>
                         </View>
                         <TouchableOpacity 
-                            onPress={scanAndConnectPrinter}
+                            onPress={scanDevices}
+                            disabled={isScanning}
                             style={[styles.miniBtn, { backgroundColor: primaryColor + '15' }]}
                         >
-                            <Text style={{ color: primaryColor, fontWeight: '800', fontSize: 12 }}>
-                                {language === 'Tamil' ? 'இணைக்கவும்' : 'Connect'}
-                            </Text>
+                            {isScanning ? (
+                                <ActivityIndicator size="small" color={primaryColor} />
+                            ) : (
+                                <Text style={{ color: primaryColor, fontWeight: '800', fontSize: 12 }}>
+                                    {language === 'Tamil' ? 'தேடுக' : 'Scan'}
+                                </Text>
+                            )}
                         </TouchableOpacity>
                     </View>
+
+                    {showDeviceList && (
+                        <View style={styles.deviceListContainer}>
+                            <Text style={styles.deviceListTitle}>{language === 'Tamil' ? 'கிடைக்கும் சாதனங்கள்' : 'Available Devices'}</Text>
+                            {pairedDevices.length > 0 ? (
+                                pairedDevices.map((item, index) => (
+                                    <TouchableOpacity 
+                                        key={index} 
+                                        style={styles.deviceItem}
+                                        onPress={() => connectToPrinter(item)}
+                                    >
+                                        <Ionicons name="print-outline" size={20} color={textColor} />
+                                        <View style={{ flex: 1, marginLeft: 10 }}>
+                                            <Text style={[styles.deviceName, { color: textColor, marginLeft: 0 }]}>{item.name || 'Unknown Device'}</Text>
+                                            <Text style={styles.deviceAddress}>{item.address}</Text>
+                                        </View>
+                                        <View style={[styles.pairStatusBadge, { backgroundColor: item.name ? '#4ADE8020' : '#94A3B820' }]}>
+                                            <Text style={[styles.pairStatusText, { color: item.name ? '#4ADE80' : '#94A3B8' }]}>
+                                                {item.type === 'paired' || (item.name && item.name.length > 0) ? 'PAIRED' : 'NEW'}
+                                            </Text>
+                                        </View>
+                                    </TouchableOpacity>
+                                ))
+                            ) : (
+                                <Text style={styles.noDeviceText}>{language === 'Tamil' ? 'சாதனங்கள் எதுவும் இல்லை' : 'No devices found'}</Text>
+                            )}
+                            <TouchableOpacity onPress={() => setShowDeviceList(false)} style={styles.closeListBtn}>
+                                <Text style={styles.closeListText}>{language === 'Tamil' ? 'மூடுக' : 'Close'}</Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
                 </View>
 
-                {/* App Settings Card */}
+                {/* Business Management Card */}
                 <View style={[styles.card, { backgroundColor: cardBg }]}>
                     <Text style={[styles.sectionCardTitle, { color: textColor }]}>
-                        {language === 'Tamil' ? 'பயன்பாட்டு அமைப்புகள்' : 'App Settings'}
+                        {language === 'Tamil' ? 'வணிக மேலாண்மை' : 'Business Management'}
+                    </Text>
+
+                    <TouchableOpacity style={styles.menuListItem} onPress={() => router.push('/shop/customers')}>
+                        <View style={[styles.menuIconBox, { backgroundColor: '#3B82F615' }]}>
+                            <Ionicons name="people" size={20} color="#3B82F6" />
+                        </View>
+                        <Text style={[styles.menuListText, { color: textColor }]}>
+                            {language === 'Tamil' ? 'வாடிக்கையாளர் விவரங்கள்' : 'Manage Customers'}
+                        </Text>
+                        <Feather name="chevron-right" size={18} color={subTextColor} />
+                    </TouchableOpacity>
+                </View>
+
+                {/* UI Theme Settings Card */}
+                <View style={[styles.card, { backgroundColor: cardBg }]}>
+                    <Text style={[styles.sectionCardTitle, { color: textColor }]}>
+                        {language === 'Tamil' ? 'தோற்றம் மற்றும் மொழி' : 'Theme & Language'}
                     </Text>
 
                     <View style={styles.settingRow}>
                         <View style={{ flex: 1 }}>
-                            <Text style={[styles.settingLabel, { color: textColor }]}>
-                                {language === 'Tamil' ? 'இருண்ட பயன்முறை' : 'Dark Mode'}
-                            </Text>
-                            <Text style={[styles.settingHint, { color: subTextColor }]}>
-                                {isDark 
-                                    ? (language === 'Tamil' ? 'இரவு நேரத்திற்கு சிறந்தது' : 'Optimized for night use')
-                                    : (language === 'Tamil' ? 'பகல் நேரத்திற்கு சிறந்தது' : 'Classic bright interface')}
-                            </Text>
+                            <Text style={[styles.settingLabel, { color: textColor }]}>{language === 'Tamil' ? 'இருண்ட பயன்முறை' : 'Dark Mode'}</Text>
                         </View>
-                        <TouchableOpacity 
-                            onPress={toggleTheme}
-                            activeOpacity={0.8}
-                            style={[
-                                styles.themeToggle, 
-                                { backgroundColor: isDark ? primaryColor : '#E2E8F0' }
-                            ]}
-                        >
-                            <View style={[
-                                styles.themeToggleBall, 
-                                isDark ? { transform: [{ translateX: scale(22) }], backgroundColor: '#FFF' } : { transform: [{ translateX: 0 }], backgroundColor: '#FFF' }
-                            ]}>
-                                <Ionicons name={isDark ? "moon" : "sunny"} size={14} color={isDark ? primaryColor : '#64748B'} />
-                            </View>
-                        </TouchableOpacity>
+                        <Switch value={isDark} onValueChange={toggleTheme} trackColor={{ false: '#767577', true: primaryColor + '80' }} thumbColor={isDark ? primaryColor : '#f4f3f4'} />
                     </View>
 
-                    <View style={[styles.menuDivider, { backgroundColor: isDark ? '#333' : '#F1F5F9', marginVertical: verticalScale(15) }]} />
+                    <View style={styles.menuDivider} />
 
                     <View style={styles.settingRow}>
                         <View style={{ flex: 1 }}>
-                            <Text style={[styles.settingLabel, { color: textColor }]}>
-                                {language === 'Tamil' ? 'மொழி தேர்வு' : 'Language'}
-                            </Text>
-                            <Text style={[styles.settingHint, { color: subTextColor }]}>
-                                {language === 'Tamil' ? 'தமிழ் அல்லது ஆங்கிலம்' : 'Choose Tamil or English'}
-                            </Text>
+                            <Text style={[styles.settingLabel, { color: textColor }]}>{language === 'Tamil' ? 'மொழி' : 'Language'}</Text>
                         </View>
                         <View style={styles.langSelector}>
-                           <TouchableOpacity 
-                            onPress={() => language !== 'Tamil' && toggleLanguage()}
-                            style={[styles.langOption, language === 'Tamil' && { backgroundColor: primaryColor, borderColor: primaryColor }]}
-                           >
+                           <TouchableOpacity onPress={() => language !== 'Tamil' && toggleLanguage()} style={[styles.langOption, language === 'Tamil' && { backgroundColor: primaryColor, borderColor: primaryColor }]}>
                                <Text style={[styles.langText, language === 'Tamil' && { color: '#FFF' }]}>தமிழ்</Text>
                            </TouchableOpacity>
-                           <TouchableOpacity 
-                            onPress={() => language !== 'English' && toggleLanguage()}
-                            style={[styles.langOption, language === 'English' && { backgroundColor: primaryColor, borderColor: primaryColor }]}
-                           >
+                           <TouchableOpacity onPress={() => language !== 'English' && toggleLanguage()} style={[styles.langOption, language === 'English' && { backgroundColor: primaryColor, borderColor: primaryColor }]}>
                                <Text style={[styles.langText, language === 'English' && { color: '#FFF' }]}>ENG</Text>
                            </TouchableOpacity>
                         </View>
                     </View>
                 </View>
 
-                {/* Branding Card */}
-                <View style={[styles.card, { backgroundColor: cardBg }]}>
-                     <Text style={[styles.sectionCardTitle, { color: textColor }]}>
-                        {language === 'Tamil' ? 'பிராண்டிங்' : 'Branding'}
-                    </Text>
-                    <View style={[styles.inputWrapper, { alignItems: 'center' }]}>
-                        <Text style={[styles.inputLabel, { color: subTextColor, alignSelf: 'flex-start' }]}>{language === 'Tamil' ? 'அதிகாரப்பூர்வ சின்னம் (Logo)' : 'Official Logo'}</Text>
-                        <TouchableOpacity 
-                            style={[styles.logoPicker, { borderColor: isDark ? '#333' : '#E2E8F0', borderStyle: merchantLogo ? 'solid' : 'dashed' }]} 
-                            onPress={pickImage}
-                            activeOpacity={0.7}
-                        >
-                            {merchantLogo ? (
-                                <Image source={{ uri: merchantLogo }} style={styles.logoPreview} />
-                            ) : (
-                                <View style={styles.placeholderLogo}>
-                                    <View style={[styles.logoIconCircle, { backgroundColor: primaryColor + '15' }]}>
-                                        <Feather name="camera" size={20} color={primaryColor} />
-                                    </View>
-                                </View>
-                            )}
-                        </TouchableOpacity>
-                        {!merchantLogo && (
-                            <Text style={[styles.logoHint, { color: primaryColor, marginTop: 8 }]}>{language === 'Tamil' ? 'படம் தேர்ந்தெடுக்கவும்' : 'Select Image'}</Text>
-                        )}
-                    </View>
-                </View>
-
-                <TouchableOpacity 
-                    style={[styles.saveBtn, { backgroundColor: primaryColor }]} 
-                    onPress={saveProfile}
-                    disabled={loading}
-                    activeOpacity={0.8}
-                >
-                    {loading ? (
-                        <ActivityIndicator color="#FFF" />
-                    ) : (
-                        <Text style={styles.saveBtnText}>{language === 'Tamil' ? 'சுயவிவரத்தைப் புதுப்பி' : 'Update Profile'}</Text>
-                    )}
+                <TouchableOpacity style={[styles.saveBtn, { backgroundColor: primaryColor }]} onPress={saveProfile} disabled={loading}>
+                    {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.saveBtnText}>{language === 'Tamil' ? 'சுயவிவரத்தைப் புதுப்பி' : 'Update Profile'}</Text>}
                 </TouchableOpacity>
             </ScrollView>
         </View>
@@ -440,207 +481,51 @@ const styles = StyleSheet.create({
         paddingBottom: verticalScale(20),
         borderBottomLeftRadius: scale(32),
         borderBottomRightRadius: scale(32),
-        overflow: 'hidden',
         elevation: 8,
-        shadowColor: '#FF8C00',
-        shadowOpacity: 0.2,
-        shadowOffset: { width: 0, height: 10 },
-        shadowRadius: 15,
     },
-    headerDecor: {
-        position: 'absolute',
-        width: scale(240),
-        height: scale(240),
-        borderRadius: scale(120),
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        top: -scale(100),
-        right: -scale(60),
-    },
-    headerTop: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    backBtn: {
-        width: scale(38),
-        height: scale(38),
-        borderRadius: scale(12),
-        backgroundColor: '#FFF',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: scale(15),
-        elevation: 5,
-        shadowColor: '#000',
-        shadowOpacity: 0.1,
-        shadowRadius: 10,
-    },
-    headerTitle: {
-        fontSize: moderateScale(20),
-        fontWeight: '900',
-        color: '#FFF',
-        letterSpacing: -0.5,
-    },
-    headerSubtitle: {
-        fontSize: moderateScale(13),
-        color: 'rgba(255,255,255,0.85)',
-        fontWeight: '600',
-        marginTop: verticalScale(2),
-    },
+    headerTop: { flexDirection: 'row', alignItems: 'center' },
+    backBtn: { width: scale(38), height: scale(38), borderRadius: scale(12), backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center', marginRight: scale(15) },
+    headerTitle: { fontSize: moderateScale(20), fontWeight: '900', color: '#FFF' },
+    headerSubtitle: { fontSize: moderateScale(13), color: 'rgba(255,255,255,0.85)', fontWeight: '600', marginTop: verticalScale(2) },
     scrollContent: { padding: scale(16) },
-    card: {
-        borderRadius: scale(20),
-        padding: scale(16),
-        marginBottom: verticalScale(16),
-        elevation: 3,
-        shadowColor: '#000',
-        shadowOpacity: 0.05,
-        shadowRadius: 10,
-        shadowOffset: { width: 0, height: 4 },
-    },
+    card: { borderRadius: scale(20), padding: scale(16), marginBottom: verticalScale(16), elevation: 3 },
     inputWrapper: { marginBottom: verticalScale(16) },
-    inputLabel: { fontSize: moderateScale(13), fontWeight: '700', marginBottom: verticalScale(8), letterSpacing: 0.3 },
+    inputLabel: { fontSize: moderateScale(13), fontWeight: '700', marginBottom: verticalScale(8) },
     input: { height: verticalScale(50), borderRadius: scale(14), borderWidth: 1.5, paddingHorizontal: scale(16), fontSize: moderateScale(15), fontWeight: '600' },
-    logoPicker: {
-        width: scale(90),
-        height: scale(90),
-        borderRadius: scale(45),
-        borderWidth: 1.5,
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'hidden',
-        backgroundColor: '#F8FAFC',
-        marginTop: verticalScale(5),
+    saveBtn: { height: verticalScale(60), borderRadius: scale(20), alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+    saveBtnText: { color: '#FFF', fontSize: moderateScale(18), fontWeight: '900' },
+    sectionCardTitle: { fontSize: moderateScale(17), fontWeight: '800', marginBottom: verticalScale(16) },
+    menuListItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: verticalScale(12) },
+    menuIconBox: { width: scale(38), height: scale(38), borderRadius: scale(10), alignItems: 'center', justifyContent: 'center', marginRight: scale(14) },
+    menuListText: { flex: 1, fontSize: moderateScale(15), fontWeight: '700' },
+    menuDivider: { height: 1, width: '100%', backgroundColor: '#F1F5F9', marginVertical: 12 },
+    miniBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 },
+    settingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    settingLabel: { fontSize: moderateScale(15), fontWeight: '700' },
+    settingHint: { fontSize: moderateScale(11), marginTop: 2 },
+    sizeSelector: { flexDirection: 'row', gap: 12, marginTop: 8 },
+    sizeOption: { flex: 1, height: 44, borderRadius: 10, borderWidth: 1.5, borderColor: '#E2E8F0', alignItems: 'center', justifyContent: 'center' },
+    sizeOptionText: { fontSize: moderateScale(13), fontWeight: '700', color: '#64748B' },
+    testBtn: { backgroundColor: '#10B98115', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 },
+    testBtnText: { color: '#10B981', fontWeight: 'bold', fontSize: 12 },
+    deviceListContainer: { marginTop: 15, padding: 10, backgroundColor: '#F1F5F9', borderRadius: 12 },
+    deviceListTitle: { fontWeight: 'bold', marginBottom: 10, color: '#475569' },
+    deviceItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+    deviceName: { flex: 1, fontWeight: '600', marginLeft: 10 },
+    deviceAddress: { fontSize: 10, color: '#94A3B8' },
+    noDeviceText: { textAlign: 'center', color: '#94A3B8', padding: 10 },
+    closeListBtn: { marginTop: 10, alignItems: 'center' },
+    closeListText: { color: '#3B82F6', fontWeight: 'bold' },
+    langSelector: { flexDirection: 'row', gap: 8 },
+    langOption: { paddingHorizontal: scale(12), paddingVertical: verticalScale(6), borderRadius: scale(8), borderWidth: 1.5, borderColor: '#E2E8F0' },
+    langText: { fontSize: moderateScale(12), fontWeight: '800', color: '#64748B' },
+    pairStatusBadge: {
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 4,
     },
-    logoPreview: { width: '100%', height: '100%', resizeMode: 'cover' },
-    placeholderLogo: { alignItems: 'center', justifyContent: 'center' },
-    logoIconCircle: { width: scale(40), height: scale(40), borderRadius: scale(20), alignItems: 'center', justifyContent: 'center' },
-    logoHint: { fontSize: moderateScale(12), fontWeight: '700' },
-    changeLogoBtn: { alignSelf: 'center', marginTop: verticalScale(10), paddingVertical: 5, paddingHorizontal: 15 },
-    saveBtn: {
-        height: verticalScale(62),
-        borderRadius: scale(20),
-        alignItems: 'center',
-        justifyContent: 'center',
-        elevation: 10,
-        shadowColor: '#FF8C00',
-        shadowOpacity: 0.35,
-        shadowRadius: 15,
-        shadowOffset: { width: 0, height: 10 },
-    },
-    saveBtnText: { color: '#FFF', fontSize: moderateScale(18), fontWeight: '900', letterSpacing: 0.5 },
-    sectionCardTitle: {
-        fontSize: moderateScale(17),
-        fontWeight: '800',
-        marginBottom: verticalScale(16),
-        letterSpacing: -0.3,
-    },
-    menuListItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: verticalScale(12),
-    },
-    menuIconBox: {
-        width: scale(38),
-        height: scale(38),
-        borderRadius: scale(10),
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: scale(14),
-    },
-    menuListText: {
-        flex: 1,
-        fontSize: moderateScale(15),
-        fontWeight: '700',
-    },
-    menuDivider: {
-        height: 1,
-        width: '100%',
-        backgroundColor: '#F1F5F9',
-        marginVertical: 12,
-    },
-    miniBtn: {
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 8,
-    },
-    errorText: {
-        color: '#EF4444',
-        fontSize: moderateScale(11),
-        fontWeight: '700',
-        marginTop: verticalScale(4),
-        marginLeft: scale(4),
-    },
-    sizeSelector: {
-        flexDirection: 'row',
-        gap: 12,
-        marginTop: 8,
-    },
-    sizeOption: {
-        flex: 1,
-        height: 44,
-        borderRadius: 10,
-        borderWidth: 1.5,
-        borderColor: '#E2E8F0',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'transparent',
-    },
-    sizeOptionText: {
-        fontSize: moderateScale(13),
-        fontWeight: '700',
-        color: '#64748B',
-    },
-    sizeHint: {
-        fontSize: moderateScale(10),
-        marginTop: 6,
-        fontStyle: 'italic',
-    },
-    settingRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
-    settingLabel: {
-        fontSize: moderateScale(15),
-        fontWeight: '700',
-    },
-    settingHint: {
-        fontSize: moderateScale(11),
-        marginTop: 2,
-    },
-    themeToggle: {
-        width: scale(52),
-        height: scale(28),
-        borderRadius: scale(14),
-        padding: scale(3),
-        justifyContent: 'center',
-    },
-    themeToggleBall: {
-        width: scale(22),
-        height: scale(22),
-        borderRadius: scale(11),
-        alignItems: 'center',
-        justifyContent: 'center',
-        elevation: 2,
-        shadowColor: '#000',
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
-    },
-    langSelector: {
-        flexDirection: 'row',
-        gap: 8,
-    },
-    langOption: {
-        paddingHorizontal: scale(12),
-        paddingVertical: verticalScale(6),
-        borderRadius: scale(8),
-        borderWidth: 1.5,
-        borderColor: '#E2E8F0',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    langText: {
-        fontSize: moderateScale(12),
-        fontWeight: '800',
-        color: '#64748B',
+    pairStatusText: {
+        fontSize: 9,
+        fontWeight: 'bold',
     },
 });

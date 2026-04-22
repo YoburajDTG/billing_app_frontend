@@ -81,6 +81,11 @@ export const billDbService = {
         const newBill = await billRepository.createBill(billInfo, items);
         return { data: newBill };
     },
+    update: async (billId: string, billData: any) => {
+        const { items, ...billInfo } = billData;
+        const success = await billRepository.updateBill(billId, billInfo, items);
+        return { data: success };
+    },
     getHistory: async () => {
         const bills = await billRepository.getHistory();
         return { data: bills };
@@ -88,6 +93,10 @@ export const billDbService = {
     getHistoryByDateRange: async (startDate: string, endDate: string) => {
         const bills = await billRepository.getBillsForDateRange(startDate, endDate);
         return { data: bills };
+    },
+    getWithItems: async (billId: string) => {
+        const billWithItems = await billRepository.getBillWithItems(billId);
+        return { data: billWithItems };
     },
     // getPdf would normally be handled by a backend, here we might return metadata
     // or trigger a client-side PDF generation in the UI components

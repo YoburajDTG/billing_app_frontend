@@ -24,7 +24,6 @@ function RootLayoutNav() {
     >
 
       <Stack.Screen name="index" options={{ headerShown: false }} />
-      <Stack.Screen name="admin/index" options={{ title: t.ADMIN }} />
       <Stack.Screen name="shop" options={{ headerShown: false }} />
     </Stack>
   );

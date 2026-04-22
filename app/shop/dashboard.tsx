@@ -21,20 +21,6 @@ import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 
-const TAMIL_QUOTES = [
-    "இன்று செய்த உழைப்பு நாளைய வெற்றியை உருவாக்கும்.",
-    "சின்ன முன்னேற்றமும் பெரிய வெற்றிக்கான முதல் படி.",
-    "நம்பிக்கை இருந்தால் முடியாதது எதுவும் இல்லை.",
-    "உழைப்பே உயர்வின் ஒரே வழி.",
-    "தோல்வி என்பது வெற்றிக்கான பாடம்.",
-    "நேரத்தை மதித்தால் வாழ்க்கை உன்னை மதிக்கும்.",
-    "இன்று தொடங்கு, நாளை வெற்றி உன்னுடையது.",
-    "தொடர்ந்த முயற்சி தான் வெற்றியின் ரகசியம்.",
-    "நீ நினைத்ததை நீ சாதிக்க முடியும்.",
-    "கஷ்டம் இல்லாமல் கண்ணீர் இல்லாமல் வெற்றி இல்லை."
-];
-
-
 export default function DashboardScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -45,16 +31,15 @@ export default function DashboardScreen() {
         totalCustomers: 0,
         totalProducts: 0,
         recentInvoices: [] as any[],
+        topProducts: [] as any[],
     });
     const [shopName, setShopName] = useState('');
     const [showTypeModal, setShowTypeModal] = useState(false);
 
-    const { isDark, language, toggleLanguage } = useAppTheme();
+    const { isDark, language, toggleLanguage, primaryColor } = useAppTheme();
     const { user } = useAuth();
     const insets = useSafeAreaInsets();
     const router = useRouter();
-
-    const quote = TAMIL_QUOTES[(new Date().getFullYear() + new Date().getMonth() + new Date().getDate()) % TAMIL_QUOTES.length];
 
 
     useFocusEffect(
@@ -141,8 +126,8 @@ export default function DashboardScreen() {
     const textCol = isDark ? '#FFFFFF' : '#1A1C1E';
     const subCol = isDark ? '#8E8E93' : '#6B7280';
     const borderCol = isDark ? '#2C2C2E' : '#E5E7EB';
-    const primary = '#FF8C00';
-    const heroBg = isDark ? '#1C1C1E' : '#FF8C00';
+    const primary = primaryColor;
+    const heroBg = isDark ? '#1C1C1E' : primaryColor;
 
     return (
         <View style={{ flex: 1, backgroundColor: bg }}>
@@ -150,7 +135,7 @@ export default function DashboardScreen() {
 
             {/* ── FIXED TOP BAR ── */}
             <LinearGradient
-                colors={isDark ? ['#1A1A1A', '#1A1A1A'] : ['#FF8C00', '#FF8C00']}
+                colors={isDark ? ['#1A1A1A', '#1A1A1A'] : [primaryColor, primaryColor]}
                 style={[
                     styles.fixedHeader,
                     { paddingTop: insets.top + (Platform.OS === 'android' ? 15 : 10) }
@@ -204,8 +189,8 @@ export default function DashboardScreen() {
             >
                 {/* ── HERO BANNER (Scrollable) ── */}
                 <LinearGradient
-                    colors={isDark ? ['#1A1A1A', '#121212'] : ['#FF8C00', '#E67E00']}
-                    style={styles.hero}
+                    colors={isDark ? ['#1A1A1A', '#121212'] : [primaryColor, primaryColor]}
+                    style={[styles.hero, { shadowColor: primaryColor }]}
                 >
                     {/* Decorative circles */}
                     <View style={[styles.decor1, { opacity: isDark ? 0.03 : 0.1 }]} />
@@ -247,36 +232,6 @@ export default function DashboardScreen() {
                 </LinearGradient>
 
                 <View style={styles.body}>
-                    {/* ── DAILY MOTIVATION ── */}
-                    <View 
-                        style={[
-                            styles.quoteCard, 
-                            { 
-                                backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF', 
-                                borderColor: isDark ? '#2C2C2E' : '#FF8C00',
-                                borderLeftWidth: 6,
-                                borderLeftColor: '#FF8C00',
-                                elevation: 4,
-                            }
-                        ]}
-                    >
-                        <MaterialCommunityIcons 
-                            name="format-quote-open" 
-                            size={20} 
-                            color="#FF8C00" 
-                            style={{ opacity: 0.2, position: 'absolute', top: 5, left: 10 }} 
-                        />
-                        <Text style={[styles.quoteText, { color: isDark ? '#FFFFFF' : '#000000', fontWeight: '800' }]}>
-                            {quote}
-                        </Text>
-                        <MaterialCommunityIcons 
-                            name="format-quote-close" 
-                            size={20} 
-                            color="#FF8C00" 
-                            style={{ opacity: 0.2, position: 'absolute', bottom: 5, right: 10 }} 
-                        />
-                    </View>
-
                     {/* ── QUICK STATS (Customers & Products) ── */}
                     <Animated.View entering={FadeInUp.delay(200).duration(400)} style={styles.quickStatsRow}>
                         <View style={[styles.quickStatCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
@@ -287,8 +242,8 @@ export default function DashboardScreen() {
                             <Text style={[styles.quickStatLabel, { color: subCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Customers'}</Text>
                         </View>
                         <View style={[styles.quickStatCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
-                            <View style={[styles.quickStatIcon, { backgroundColor: '#FF8C0015' }]}>
-                                <MaterialCommunityIcons name="food-apple" size={20} color="#FF8C00" />
+                            <View style={[styles.quickStatIcon, { backgroundColor: primaryColor + '15' }]}>
+                                <MaterialCommunityIcons name="food-apple" size={20} color={primaryColor} />
                             </View>
                             <Text style={[styles.quickStatValue, { color: textCol }]} numberOfLines={1} adjustsFontSizeToFit>{stats.totalProducts}</Text>
                             <Text style={[styles.quickStatLabel, { color: subCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'பொருட்கள்' : 'Products'}</Text>
@@ -307,6 +262,7 @@ export default function DashboardScreen() {
                     <Animated.View entering={FadeInUp.delay(250).duration(400)}>
                         <Text style={[styles.sectionTitle, { color: textCol }]}>{language === 'Tamil' ? 'விரைவு செயல்கள்' : 'Quick Actions'}</Text>
                         <View style={styles.actionsRow}>
+                            {/* 1. Retail Bill */}
                             <TouchableOpacity
                                 style={[styles.actionCard, { backgroundColor: primary }]}
                                 onPress={() => handleNewBill('retail')}
@@ -315,10 +271,11 @@ export default function DashboardScreen() {
                                 <View style={styles.actionIconBox}>
                                     <Ionicons name="cart" size={26} color="#FFF" />
                                 </View>
-                                <Text style={styles.actionTitle} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'சில்லரை விற்பனை' : 'Retail Bill'}</Text>
+                                <Text style={styles.actionTitle} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'சில்லறை விற்பனை' : 'Retail Bill'}</Text>
                                 <Text style={styles.actionDesc}>{language === 'Tamil' ? 'சாதாரண விலை' : 'Standard rates'}</Text>
                             </TouchableOpacity>
 
+                            {/* 2. Wholesale */}
                             <TouchableOpacity
                                 style={[styles.actionCard, { backgroundColor: '#3B82F6' }]}
                                 onPress={() => handleNewBill('wholesale')}
@@ -331,30 +288,7 @@ export default function DashboardScreen() {
                                 <Text style={styles.actionDesc}>{language === 'Tamil' ? 'மொத்த விலை' : 'Bulk rates'}</Text>
                             </TouchableOpacity>
 
-                            <TouchableOpacity
-                                style={[styles.actionCard, { backgroundColor: isDark ? '#252525' : '#F3F4F6', borderWidth: 1, borderColor: borderCol }]}
-                                onPress={() => router.push('/shop/prices')}
-                                activeOpacity={0.85}
-                            >
-                                <View style={[styles.actionIconBox, { backgroundColor: primary + '20' }]}>
-                                    <Ionicons name="pricetag" size={26} color={primary} />
-                                </View>
-                                <Text style={[styles.actionTitle, { color: textCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'விலை நிர்ணயம்' : 'Set Prices'}</Text>
-                                <Text style={[styles.actionDesc, { color: subCol }]}>{language === 'Tamil' ? 'தினசரி விலை' : 'Daily rates'}</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={[styles.actionCard, { backgroundColor: isDark ? '#252525' : '#F3F4F6', borderWidth: 1, borderColor: borderCol }]}
-                                onPress={() => router.push('/shop/history')}
-                                activeOpacity={0.85}
-                            >
-                                <View style={[styles.actionIconBox, { backgroundColor: '#FF8C0015' }]}>
-                                    <MaterialCommunityIcons name="history" size={26} color="#FF8C00" />
-                                </View>
-                                <Text style={[styles.actionTitle, { color: textCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'ரசீது வரலாறு' : 'History'}</Text>
-                                <Text style={[styles.actionDesc, { color: subCol }]}>{language === 'Tamil' ? 'அனைத்து ரசீதுகள்' : 'All invoices'}</Text>
-                            </TouchableOpacity>
-
+                            {/* 3. Function Bill */}
                             <TouchableOpacity
                                 style={[styles.actionCard, { backgroundColor: isDark ? '#252525' : '#F5F3FF', borderWidth: 1, borderColor: '#8B5CF650' }]}
                                 onPress={handleFunctionBill}
@@ -365,6 +299,32 @@ export default function DashboardScreen() {
                                 </View>
                                 <Text style={[styles.actionTitle, { color: textCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'விழா பில்' : 'Function Bill'}</Text>
                                 <Text style={[styles.actionDesc, { color: subCol }]}>{language === 'Tamil' ? 'திருமணம் & நிகழ்வு' : 'Marriage & Events'}</Text>
+                            </TouchableOpacity>
+
+                            {/* 4. Set Price */}
+                            <TouchableOpacity
+                                style={[styles.actionCard, { backgroundColor: isDark ? '#252525' : '#F3F4F6', borderWidth: 1, borderColor: borderCol }]}
+                                onPress={() => router.push('/shop/prices')}
+                                activeOpacity={0.85}
+                            >
+                                <View style={[styles.actionIconBox, { backgroundColor: primary + '20' }]}>
+                                    <Ionicons name="pricetag" size={26} color={primary} />
+                                </View>
+                                <Text style={[styles.actionTitle, { color: textCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'விலை நிர்ணயம்' : 'Set Price'}</Text>
+                                <Text style={[styles.actionDesc, { color: subCol }]}>{language === 'Tamil' ? 'தினசரி விலை' : 'Daily rates'}</Text>
+                            </TouchableOpacity>
+
+                            {/* 5. History */}
+                            <TouchableOpacity
+                                style={[styles.actionCard, { backgroundColor: isDark ? '#252525' : '#F3F4F6', borderWidth: 1, borderColor: borderCol }]}
+                                onPress={() => router.push('/shop/history')}
+                                activeOpacity={0.85}
+                            >
+                                <View style={[styles.actionIconBox, { backgroundColor: primaryColor + '15' }]}>
+                                    <MaterialCommunityIcons name="history" size={26} color={primaryColor} />
+                                </View>
+                                <Text style={[styles.actionTitle, { color: textCol }]} numberOfLines={1} adjustsFontSizeToFit>{language === 'Tamil' ? 'ரசீது வரலாறு' : 'History'}</Text>
+                                <Text style={[styles.actionDesc, { color: subCol }]}>{language === 'Tamil' ? 'அனைத்து ரசீதுகள்' : 'All invoices'}</Text>
                             </TouchableOpacity>
                         </View>
                     </Animated.View>
@@ -418,14 +378,14 @@ export default function DashboardScreen() {
                                             </Text>
                                         </View>
                                     </View>
-                                    <View style={styles.invoiceRight}>
-                                        <Text style={[styles.invoiceTotal, { color: primary }]}>
-                                            ₹{Number(inv.total_amount).toFixed(0)}
-                                        </Text>
-                                        <View style={[styles.paidBadge, { backgroundColor: '#FF8C0015' }]}>
-                                            <Text style={[styles.paidText, { color: '#FF8C00' }]}>{language === 'Tamil' ? 'செலுத்தப்பட்டது' : 'Paid'}</Text>
+                                        <View style={[styles.invoiceRight, { justifyContent: 'center' }]}>
+                                            <Text style={[styles.invoiceTotal, { color: primary }]}>
+                                                ₹{Number(inv.total_amount).toFixed(0)}
+                                            </Text>
+                                            <View style={[styles.paidBadge, { backgroundColor: primaryColor + '15' }]}>
+                                                <Text style={[styles.paidText, { color: primaryColor }]}>{language === 'Tamil' ? 'செலுத்தப்பட்டது' : 'Paid'}</Text>
+                                            </View>
                                         </View>
-                                    </View>
                                 </Animated.View>
                             ))
                         ) : (
@@ -451,7 +411,7 @@ export default function DashboardScreen() {
                         <Text style={[styles.footerTagline, { color: subCol }]}>
                             {language === 'Tamil' ? 'தரமான பொருட்கள், நியாயமான விலை!' : 'Fresh Quality, Fair Prices!'}
                         </Text>
-                        <View style={styles.footerLine} />
+                        <View style={[styles.footerLine, { backgroundColor: primaryColor }]} />
                     </View>
                 </View>
             </ScrollView>
@@ -521,7 +481,6 @@ const styles = StyleSheet.create({
         paddingBottom: verticalScale(12),
         zIndex: 10,
     },
-    // Hero
     hero: {
         paddingHorizontal: scale(20),
         paddingBottom: verticalScale(20),
@@ -530,7 +489,6 @@ const styles = StyleSheet.create({
         borderBottomLeftRadius: scale(32),
         borderBottomRightRadius: scale(32),
         elevation: 8,
-        shadowColor: '#FF8C00',
         shadowOpacity: 0.15,
         shadowRadius: 15,
         shadowOffset: { width: 0, height: 10 },
@@ -600,101 +558,84 @@ const styles = StyleSheet.create({
     langPillActive: {
         backgroundColor: '#FFF',
         elevation: 3,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
     },
     langPillText: {
         fontSize: moderateScale(10),
-        fontWeight: '800',
-        color: 'rgba(255,255,255,0.7)',
+        fontWeight: '700',
+        color: '#FFF',
     },
     langPillTextActive: {
-        color: '#FF8C00',
+        color: '#000',
     },
     revenueBanner: {
         flexDirection: 'row',
         borderRadius: scale(20),
         padding: scale(18),
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginTop: verticalScale(5),
     },
     revenueItem: {
         flex: 1,
-        alignItems: 'center',
     },
     revenueLabel: {
-        fontSize: moderateScale(12),
-        fontWeight: '600',
-        marginBottom: 4,
+        fontSize: moderateScale(11),
+        fontWeight: '700',
+        marginBottom: verticalScale(4),
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
     },
     revenueValue: {
-        fontSize: moderateScale(22),
+        fontSize: moderateScale(20),
         fontWeight: '900',
-        letterSpacing: -0.5,
     },
     revenueDivider: {
-        width: 1,
-        marginHorizontal: scale(10),
+        width: 1.5,
+        height: '70%',
+        marginHorizontal: scale(15),
     },
-    // Body
     body: {
-        paddingHorizontal: scale(16),
+        paddingHorizontal: scale(20),
         paddingTop: verticalScale(20),
     },
-    // Quick stats
     quickStatsRow: {
         flexDirection: 'row',
-        gap: scale(10),
+        justifyContent: 'space-between',
         marginBottom: verticalScale(24),
+        gap: scale(10),
     },
     quickStatCard: {
         flex: 1,
-        borderRadius: scale(15),
-        padding: scale(10),
-        alignItems: 'center',
+        borderRadius: scale(18),
+        padding: scale(12),
         borderWidth: 1,
-        elevation: 2,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.04,
-        shadowRadius: 6,
+        alignItems: 'center',
     },
     quickStatIcon: {
         width: scale(36),
         height: scale(36),
-        borderRadius: scale(10),
+        borderRadius: scale(12),
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: verticalScale(6),
+        marginBottom: verticalScale(8),
     },
     quickStatValue: {
-        fontSize: moderateScale(17),
-        fontWeight: '900',
+        fontSize: moderateScale(18),
+        fontWeight: '800',
         marginBottom: 2,
     },
     quickStatLabel: {
-        fontSize: moderateScale(10),
+        fontSize: moderateScale(9),
         fontWeight: '700',
-        marginTop: 2,
+        opacity: 0.8,
+        textAlign: 'center',
     },
-    // Section headers
     sectionTitle: {
-        fontSize: moderateScale(18),
+        fontSize: moderateScale(17),
         fontWeight: '800',
-        marginBottom: verticalScale(14),
+        marginBottom: verticalScale(16),
         letterSpacing: -0.3,
     },
-    sectionRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: verticalScale(14),
-    },
-    seeAll: {
-        fontSize: moderateScale(13),
-        fontWeight: '700',
-    },
-    // Quick Actions
     actionsRow: {
         flexDirection: 'row',
         flexWrap: 'wrap',
@@ -702,261 +643,238 @@ const styles = StyleSheet.create({
         marginBottom: verticalScale(24),
     },
     actionCard: {
-        width: '47.5%',
+        width: '48.5%', 
         borderRadius: scale(20),
         padding: scale(16),
         elevation: 3,
         shadowColor: '#000',
+        shadowOpacity: 0.1,
+        shadowRadius: 6,
         shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.08,
-        shadowRadius: 8,
     },
     actionIconBox: {
-        width: scale(44),
-        height: scale(44),
+        width: scale(42),
+        height: scale(42),
         borderRadius: scale(14),
-        backgroundColor: 'rgba(255,255,255,0.2)',
-        alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: verticalScale(10),
+        alignItems: 'center',
+        marginBottom: verticalScale(12),
+        backgroundColor: 'rgba(255,255,255,0.2)',
     },
     actionTitle: {
-        fontSize: moderateScale(15),
-        fontWeight: '800',
         color: '#FFF',
+        fontSize: moderateScale(14),
+        fontWeight: '800',
         marginBottom: 2,
     },
     actionDesc: {
-        fontSize: moderateScale(11),
-        color: 'rgba(255,255,255,0.75)',
-        fontWeight: '500',
+        color: 'rgba(255,255,255,0.8)',
+        fontSize: moderateScale(10),
+        fontWeight: '600',
     },
-    topProductsRow: {
+    sectionRow: {
         flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: scale(10),
-    },
-    topProductCard: {
-        width: '48%',
-        borderRadius: scale(16),
-        padding: scale(12),
-        borderWidth: 1,
+        justifyContent: 'space-between',
         alignItems: 'center',
+        marginBottom: verticalScale(16),
     },
-    topProductTitle: {
-        fontSize: moderateScale(13),
-        fontWeight: '700',
-        marginBottom: 4,
-    },
-    topProductQty: {
+    seeAll: {
         fontSize: moderateScale(12),
-        fontWeight: '800',
+        fontWeight: '700',
     },
-    // Invoice cards
     invoiceCard: {
         flexDirection: 'row',
         alignItems: 'center',
         borderRadius: scale(16),
-        padding: scale(14),
+        padding: scale(12),
         marginBottom: verticalScale(10),
         borderWidth: 1,
-        elevation: 1,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.03,
-        shadowRadius: 4,
     },
     invoiceIconBox: {
-        width: scale(42),
-        height: scale(42),
-        borderRadius: scale(12),
-        alignItems: 'center',
+        width: scale(38),
+        height: scale(38),
+        borderRadius: scale(10),
         justifyContent: 'center',
+        alignItems: 'center',
         marginRight: scale(12),
     },
     invoiceInfo: {
         flex: 1,
     },
+    invoiceName: {
+        fontSize: moderateScale(14),
+        fontWeight: '700',
+        marginBottom: 2,
+    },
     invoiceMeta: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: 3,
-    },
-    invoiceName: {
-        fontSize: moderateScale(15),
-        fontWeight: '700',
     },
     invoiceDate: {
         fontSize: moderateScale(11),
-        fontWeight: '500',
+        fontWeight: '600',
     },
     invoiceRight: {
         alignItems: 'flex-end',
-        gap: 4,
     },
     invoiceTotal: {
         fontSize: moderateScale(16),
-        fontWeight: '900',
+        fontWeight: '800',
+        marginBottom: 2,
     },
     paidBadge: {
-        paddingHorizontal: scale(8),
-        paddingVertical: 2,
-        borderRadius: scale(6),
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 8,
     },
     paidText: {
-        fontSize: moderateScale(10),
+        fontSize: moderateScale(9),
         fontWeight: '800',
-        color: '#FF8C00',
     },
-    // Empty state
+    topProductsRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: scale(8),
+    },
+    topProductCard: {
+        flex: 1,
+        minWidth: '45%',
+        padding: scale(12),
+        borderRadius: scale(14),
+        borderWidth: 1,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    topProductTitle: {
+        fontSize: moderateScale(12),
+        fontWeight: '700',
+        flex: 1,
+    },
+    topProductQty: {
+        fontSize: moderateScale(12),
+        fontWeight: '800',
+    },
     emptyBox: {
         alignItems: 'center',
-        padding: scale(32),
+        justifyContent: 'center',
+        padding: scale(30),
         borderRadius: scale(24),
         borderWidth: 1,
         borderStyle: 'dashed',
-        gap: verticalScale(8),
     },
     emptyTitle: {
-        fontSize: moderateScale(18),
+        fontSize: moderateScale(16),
         fontWeight: '800',
+        marginTop: verticalScale(12),
     },
     emptyDesc: {
-        fontSize: moderateScale(13),
-        fontWeight: '500',
+        fontSize: moderateScale(12),
+        fontWeight: '600',
         textAlign: 'center',
+        marginTop: verticalScale(4),
+        marginBottom: verticalScale(16),
     },
     emptyBtn: {
-        marginTop: verticalScale(8),
-        paddingVertical: verticalScale(12),
-        paddingHorizontal: scale(28),
-        borderRadius: scale(14),
+        paddingHorizontal: scale(20),
+        paddingVertical: verticalScale(10),
+        borderRadius: scale(12),
     },
     emptyBtnText: {
         color: '#FFF',
         fontWeight: '800',
-        fontSize: moderateScale(14),
+        fontSize: moderateScale(13),
+    },
+    footerBranding: {
+        alignItems: 'center',
+        marginTop: verticalScale(20),
+        marginBottom: verticalScale(10),
+        opacity: 0.6,
+    },
+    footerShopName: {
+        fontSize: moderateScale(12),
+        fontWeight: '800',
+        letterSpacing: 1,
+    },
+    footerTagline: {
+        fontSize: moderateScale(10),
+        fontWeight: '600',
+        marginTop: 2,
+    },
+    footerLine: {
+        width: scale(30),
+        height: 2,
+        borderRadius: 1,
+        marginTop: verticalScale(10),
     },
     center: {
-        height: verticalScale(150),
-        alignItems: 'center',
+        flex: 1,
         justifyContent: 'center',
+        alignItems: 'center',
+        padding: scale(20),
     },
-    // Modal
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.6)',
+        backgroundColor: 'rgba(0,0,0,0.5)',
         justifyContent: 'flex-end',
-        padding: scale(16),
     },
     modalContent: {
-        borderRadius: scale(28),
+        borderTopLeftRadius: scale(30),
+        borderTopRightRadius: scale(30),
         padding: scale(24),
-        elevation: 20,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: -5 },
-        shadowOpacity: 0.3,
-        shadowRadius: 20,
     },
     modalHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: verticalScale(6),
+        marginBottom: verticalScale(8),
+    },
+    modalTitle: {
+        fontSize: moderateScale(18),
+        fontWeight: '900',
     },
     modalCloseBtn: {
-        width: scale(36),
-        height: scale(36),
-        borderRadius: scale(18),
+        width: scale(32),
+        height: scale(32),
+        borderRadius: scale(16),
         alignItems: 'center',
         justifyContent: 'center',
     },
-    modalTitle: {
-        fontSize: moderateScale(22),
-        fontWeight: '900',
-    },
     modalSubtitle: {
-        fontSize: moderateScale(14),
-        fontWeight: '500',
+        fontSize: moderateScale(13),
+        fontWeight: '600',
         marginBottom: verticalScale(20),
     },
     typeButtonsRow: {
-        flexDirection: 'row',
-        gap: scale(12),
+        gap: verticalScale(12),
     },
     typeBtn: {
-        flex: 1,
-        borderRadius: scale(22),
-        padding: scale(18),
+        flexDirection: 'row',
         alignItems: 'center',
-        borderWidth: 2,
+        padding: scale(16),
+        borderRadius: scale(20),
+        borderWidth: 1,
     },
     typeIconBox: {
-        width: scale(56),
-        height: scale(56),
-        borderRadius: scale(28),
+        width: scale(48),
+        height: scale(48),
+        borderRadius: scale(16),
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: verticalScale(12),
-        elevation: 4,
+        marginRight: scale(16),
     },
     typeBtnTitle: {
-        fontSize: moderateScale(15),
+        fontSize: moderateScale(16),
         fontWeight: '800',
-        marginBottom: 2,
+        flex: 1,
     },
     typeBtnDesc: {
-        fontSize: moderateScale(11),
-        color: '#9CA3AF',
-        fontWeight: '600',
-    },
-    quoteCard: {
-        paddingVertical: verticalScale(15),
-        paddingHorizontal: scale(20),
-        borderRadius: scale(16),
-        marginBottom: verticalScale(16),
-        borderWidth: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        elevation: 3,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.05,
-        shadowRadius: 10,
-        position: 'relative',
-        overflow: 'hidden',
-    },
-    quoteText: {
-        fontSize: moderateScale(13),
+        fontSize: moderateScale(10),
         fontWeight: '700',
-        textAlign: 'center',
-        fontStyle: 'italic',
-        lineHeight: moderateScale(22),
-        paddingHorizontal: scale(10),
-    },
-    footerBranding: {
-        marginTop: verticalScale(40),
-        marginBottom: verticalScale(20),
-        alignItems: 'center',
-        opacity: 0.6,
-    },
-    footerShopName: {
-        fontSize: moderateScale(18),
-        fontWeight: '900',
-        letterSpacing: 1,
-        textTransform: 'uppercase',
-    },
-    footerTagline: {
-        fontSize: moderateScale(12),
-        fontWeight: '600',
-        marginTop: 4,
-    },
-    footerLine: {
-        width: scale(40),
-        height: 2,
-        backgroundColor: '#FF8C00',
-        marginTop: 10,
-        borderRadius: 1,
+        color: '#666',
+        backgroundColor: 'rgba(0,0,0,0.05)',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
     },
 });
-

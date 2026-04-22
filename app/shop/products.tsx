@@ -22,7 +22,7 @@ import {
     View,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -40,7 +40,7 @@ export default function ProductsScreen() {
   const [category, setCategory] = useState("");
   const [imageUrl, setImageUrl] = useState("");
 
-  const { isDark, language } = useAppTheme();
+  const { isDark, language, primaryColor } = useAppTheme();
   const insets = useSafeAreaInsets();
 
   const fetchProducts = useCallback(async () => {
@@ -115,25 +115,7 @@ export default function ProductsScreen() {
     }
   };
 
-  const pickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert(
-        language === "Tamil" ? "பிழை" : "Error",
-        language === "Tamil"
-          ? "கேலரி அனுமதி தேவை"
-          : "Sorry, we need camera roll permissions to make this work!"
-      );
-      return;
-    }
-
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
-
+  const handleImageSelection = async (result: ImagePicker.ImagePickerResult) => {
     if (!result.canceled) {
       const selectedImage = result.assets[0].uri;
       
@@ -151,6 +133,49 @@ export default function ProductsScreen() {
         setImageUrl(selectedImage);
       }
     }
+  };
+
+  const pickImage = async () => {
+    Alert.alert(
+      language === "Tamil" ? "புகைப்படத்தை மாற்றவும்" : "Select Image",
+      language === "Tamil" ? "ஒன்றைத் தேர்ந்தெடுக்கவும்" : "Choose an option",
+      [
+        {
+          text: language === "Tamil" ? "கேலரி" : "Gallery",
+          onPress: async () => {
+            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert(language === "Tamil" ? "பிழை" : "Error", language === "Tamil" ? "கேலரி அனுமதி தேவை" : "Gallery permission required");
+              return;
+            }
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ['images'],
+              allowsEditing: true,
+              aspect: [1, 1],
+              quality: 0.8,
+            });
+            handleImageSelection(result);
+          }
+        },
+        {
+          text: language === "Tamil" ? "கேமரா" : "Camera",
+          onPress: async () => {
+            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert(language === "Tamil" ? "பிழை" : "Error", language === "Tamil" ? "கேமரா அனுமதி தேவை" : "Camera permission required");
+              return;
+            }
+            const result = await ImagePicker.launchCameraAsync({
+              allowsEditing: true,
+              aspect: [1, 1],
+              quality: 0.8,
+            });
+            handleImageSelection(result);
+          }
+        },
+        { text: language === "Tamil" ? "ரத்து" : "Cancel", style: "cancel" }
+      ]
+    );
   };
 
   const handleDelete = (id: string) => {
@@ -261,7 +286,7 @@ export default function ProductsScreen() {
   const cardBg = isDark ? "#1E1E1E" : "#FFFFFF";
   const textColor = isDark ? "#FFF" : "#1E293B";
   const subTextColor = isDark ? "#94A3B8" : "#64748B";
-  const primaryColor = "#FF8C00";
+  const primaryColorVar = primaryColor;
 
   const renderItem = ({ item, index }: { item: Vegetable; index: number }) => {
     const isSelected = selectedItems.has(item.id);
@@ -324,11 +349,11 @@ export default function ProductsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: background }]}>
-      <StatusBar style="light" backgroundColor="#FF8C00" />
+      <StatusBar style="light" backgroundColor={primaryColor} />
 
       <LinearGradient
-        colors={["#FF8C00", "#FF8C00"]}
-        style={[styles.header, { paddingTop: insets.top + (Platform.OS === 'android' ? verticalScale(15) : verticalScale(10)) }]}
+        colors={[primaryColor, primaryColor]}
+        style={[styles.header, { shadowColor: primaryColor, paddingTop: insets.top + (Platform.OS === 'android' ? verticalScale(15) : verticalScale(10)) }]}
       >
         <View style={styles.headerDecor} />
         <View style={styles.headerTop}>
@@ -357,7 +382,7 @@ export default function ProductsScreen() {
               </>
             ) : (
               <TouchableOpacity style={styles.addTrigger} onPress={openAddModal}>
-                <Ionicons name="add" size={28} color="#FF8C00" />
+                <Ionicons name="add" size={28} color={primaryColor} />
               </TouchableOpacity>
             )}
           </View>
@@ -536,7 +561,7 @@ export default function ProductsScreen() {
                 style={[
                   styles.sheetBtn,
                   styles.saveSheetBtn,
-                  { backgroundColor: primaryColor },
+                  { backgroundColor: primaryColor, shadowColor: primaryColor },
                 ]}
                 onPress={handleSave}
               >
@@ -567,7 +592,6 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: scale(32),
     overflow: "hidden",
     elevation: 8,
-    shadowColor: '#FF8C00',
     shadowOpacity: 0.2,
     shadowRadius: 15,
     shadowOffset: { width: 0, height: 10 },
@@ -748,7 +772,6 @@ const styles = StyleSheet.create({
   closeSheetBtn: { backgroundColor: "transparent" },
   saveSheetBtn: {
     elevation: 8,
-    shadowColor: "#FF8C00",
     shadowOpacity: 0.3,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 6 },

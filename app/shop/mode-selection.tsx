@@ -20,7 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 export default function ModeSelectionScreen() {
     const router = useRouter();
     const { user } = useAuth();
-    const { isDark, toggleTheme, language } = useAppTheme();
+    const { isDark, toggleTheme, language, primaryColor } = useAppTheme();
     const insets = useSafeAreaInsets();
 
     const handleModeSelect = (mode: 'wholesale' | 'retail') => {
@@ -29,7 +29,7 @@ export default function ModeSelectionScreen() {
     };
 
 
-    const primaryColor = '#FF8C00';
+    const primaryColorVar = primaryColor;
     const background = isDark ? '#0F0F0F' : '#F8FAFC';
     const cardBg = isDark ? '#1E1E1E' : '#FFFFFF';
     const textColor = isDark ? '#FFF' : '#1E293B';
@@ -37,15 +37,18 @@ export default function ModeSelectionScreen() {
 
     return (
         <View style={[styles.container, { backgroundColor: background }]}>
-            <StatusBar style="light" backgroundColor="#FF8C00" />
+            <StatusBar style="light" backgroundColor={primaryColor} />
 
             <LinearGradient
-                colors={['#FF8C00', '#E67E00']}
-                style={[styles.hero, { paddingTop: insets.top + (Platform.OS === 'android' ? verticalScale(20) : verticalScale(10)) }]}
+                colors={[primaryColor, primaryColor]}
+                style={[styles.hero, { 
+                    paddingTop: insets.top + (Platform.OS === 'android' ? verticalScale(20) : verticalScale(10)),
+                    shadowColor: primaryColor 
+                }]}
             >
                 <View style={styles.headerDecor} />
                 <Animated.View entering={ZoomIn.duration(600)} style={styles.avatarCircle}>
-                    <Text style={styles.avatarText}>{user?.username?.charAt(0).toUpperCase() || 'S'}</Text>
+                    <Text style={[styles.avatarText, { color: primaryColor }]}>{user?.username?.charAt(0).toUpperCase() || 'S'}</Text>
                 </Animated.View>
                 <Animated.Text entering={FadeInDown.delay(200)} style={styles.greeting}>{language === 'Tamil' ? 'மீண்டும் வருக,' : 'Welcome back,'}</Animated.Text>
                 <Animated.Text entering={FadeInDown.delay(300)} style={styles.userName}>{user?.username || (language === 'Tamil' ? 'உரிமையாளர்' : 'Owner')}</Animated.Text>
@@ -53,7 +56,7 @@ export default function ModeSelectionScreen() {
                 
                 <View style={styles.heroActions}>
                     <TouchableOpacity onPress={toggleTheme} style={styles.roundActionBtn}>
-                        <Ionicons name={isDark ? "sunny" : "moon"} size={22} color="#FF8C00" />
+                        <Ionicons name={isDark ? "sunny" : "moon"} size={22} color={primaryColor} />
                     </TouchableOpacity>
                 </View>
             </LinearGradient>
@@ -113,12 +116,12 @@ export default function ModeSelectionScreen() {
                             onPress={() => router.push('/shop/dashboard')}
                             activeOpacity={0.85}
                         >
-                            <View style={[styles.modeIconCircle, { backgroundColor: '#FF8C0010' }]}>
-                                <MaterialCommunityIcons name="view-dashboard" size={36} color="#FF8C00" />
+                            <View style={[styles.modeIconCircle, { backgroundColor: primaryColor + '10' }]}>
+                                <MaterialCommunityIcons name="view-dashboard" size={36} color={primaryColor} />
                             </View>
                             <View style={styles.modeTextCol}>
                                 <Text style={[styles.modeName, { color: textColor }]}>{language === 'Tamil' ? 'முகப்புத் திரை' : 'Dashboard'}</Text>
-                                <Text style={[styles.modeTamil, { color: '#FF8C00' }]}>முகப்பு தகவல்கள்</Text>
+                                <Text style={[styles.modeTamil, { color: primaryColor }]}>முகப்பு தகவல்கள்</Text>
                                 <Text style={[styles.modeDesc, { color: subTextColor }]}>{language === 'Tamil' ? 'விற்பனை அறிக்கைகள் மற்றும் இருப்பைக் காண்க' : 'View sales reports, inventory and history'}</Text>
                             </View>
                             <Feather name="chevron-right" size={24} color={subTextColor} />
@@ -140,7 +143,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         overflow: 'hidden',
         elevation: 10,
-        shadowColor: '#FF8C00',
         shadowOpacity: 0.2,
         shadowRadius: 20,
         shadowOffset: { width: 0, height: 12 },
@@ -168,7 +170,7 @@ const styles = StyleSheet.create({
         shadowRadius: 15,
         shadowOffset: { width: 0, height: 10 },
     },
-    avatarText: { fontSize: moderateScale(36), fontWeight: '900', color: '#FF8C00' },
+    avatarText: { fontSize: moderateScale(36), fontWeight: '900' },
     greeting: { fontSize: moderateScale(16), fontWeight: '600', color: 'rgba(255,255,255,0.85)', marginBottom: 4 },
     userName: { fontSize: moderateScale(32), fontWeight: '900', color: '#FFF', marginBottom: 4, letterSpacing: -0.5 },
     shopName: { fontSize: moderateScale(14), fontWeight: '700', color: '#FFF', opacity: 0.9, letterSpacing: 1, textTransform: 'uppercase' },

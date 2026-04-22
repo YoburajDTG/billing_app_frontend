@@ -23,7 +23,7 @@ import {
 export default function SetPricesScreen() {
   const [vegetables, setVegetables] = useState<any[]>([]);
   const router = useRouter();
-  const { t, isDark, language } = useAppTheme();
+  const { t, isDark, language, primaryColor } = useAppTheme();
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
@@ -154,7 +154,7 @@ export default function SetPricesScreen() {
   const cardBg = isDark ? "#1E1E1E" : "#FFFFFF";
   const textCol = isDark ? "#FFFFFF" : "#1E293B";
   const subText = isDark ? "#A1A1AA" : "#64748B";
-  const primaryCol = "#FF8C00";
+  const primaryCol = primaryColor;
   const borderCol = isDark ? "#2C2C2E" : "#E2E8F0";
 
   return (
@@ -163,10 +163,16 @@ export default function SetPricesScreen() {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <LinearGradient
-        colors={isDark ? ["#1A1A1A", "#1A1A1A"] : ["#FF8C00", "#FF8C00"]}
+        colors={isDark ? ["#1A1A1A", "#1A1A1A"] : [primaryColor, primaryColor]}
         style={[
           styles.header,
-          { paddingTop: insets.top + (Platform.OS === "android" ? verticalScale(15) : verticalScale(10)) },
+          { 
+            paddingTop: insets.top + (Platform.OS === "android" ? verticalScale(15) : verticalScale(10)),
+            shadowColor: primaryColor,
+            shadowOpacity: 0.2,
+            shadowOffset: { width: 0, height: 10 },
+            shadowRadius: 15,
+          },
         ]}
       >
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
@@ -190,12 +196,20 @@ export default function SetPricesScreen() {
         <Text style={[styles.headerCol, { color: subText, flex: 1.8, textAlign: 'left', paddingLeft: scale(20) }]}>
           {language === "Tamil" ? "பொருள்" : "Item"}
         </Text>
-        <Text style={[styles.headerCol, { color: subText, paddingRight: scale(10) }]}>
-          {language === "Tamil" ? "மொத்த" : "Wholesale"}
-        </Text>
-        <Text style={[styles.headerCol, { color: subText, paddingRight: scale(30) }]}>
-          {language === "Tamil" ? "சில்லறை" : "Retail"}
-        </Text>
+        <View style={styles.headerPillContainer}>
+            <View style={[styles.typePill, { backgroundColor: '#3B82F615' }]}>
+                <Text style={[styles.typePillText, { color: '#3B82F6' }]}>
+                    {language === "Tamil" ? "மொத்த" : "Ws"}
+                </Text>
+            </View>
+        </View>
+        <View style={styles.headerPillContainer}>
+            <View style={[styles.typePill, { backgroundColor: primaryCol + '15' }]}>
+                <Text style={[styles.typePillText, { color: primaryCol }]}>
+                    {language === "Tamil" ? "சில்லறை" : "Ret"}
+                </Text>
+            </View>
+        </View>
       </View>
 
       <ScrollView
@@ -221,9 +235,19 @@ export default function SetPricesScreen() {
 
             <View style={styles.inputsRow}>
               <View style={styles.inputGroup}>
-                <Text style={styles.currencyPrefix}>₹</Text>
+                <View style={[styles.inputPrefixBox, { backgroundColor: '#3B82F615' }]}>
+                  <Ionicons name="business" size={moderateScale(12)} color="#3B82F6" />
+                </View>
                 <TextInput
-                  style={[styles.priceInput, { backgroundColor: isDark ? "#2C2C2E" : "#F1F5F9", color: textCol, borderColor: borderCol }]}
+                  style={[
+                      styles.priceInput, 
+                      { 
+                          backgroundColor: isDark ? "#121212" : "#F8FAFC", 
+                          color: textCol, 
+                          borderColor: '#3B82F640',
+                          borderWidth: 1 
+                      }
+                  ]}
                   keyboardType="numeric"
                   defaultValue={v.wholesalePrice?.toString()}
                   onChangeText={(val) => updatePrice(v.id, "wholesale", val)}
@@ -234,9 +258,19 @@ export default function SetPricesScreen() {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.currencyPrefix}>₹</Text>
+                <View style={[styles.inputPrefixBox, { backgroundColor: primaryCol + '15' }]}>
+                  <Ionicons name="cart" size={moderateScale(12)} color={primaryCol} />
+                </View>
                 <TextInput
-                  style={[styles.priceInput, { backgroundColor: isDark ? "#2C2C2E" : "#F1F5F9", color: primaryCol, borderColor: primaryCol, borderWidth: 1 }]} 
+                  style={[
+                      styles.priceInput, 
+                      { 
+                          backgroundColor: isDark ? "#121212" : "#F8FAFC", 
+                          color: textCol, 
+                          borderColor: primaryCol + '50', 
+                          borderWidth: 1.5 
+                      }
+                  ]} 
                   keyboardType="numeric"
                   defaultValue={v.retailPrice?.toString()}
                   onChangeText={(val) => updatePrice(v.id, "retail", val)}
@@ -263,10 +297,10 @@ export default function SetPricesScreen() {
       >
         <TouchableOpacity activeOpacity={0.8} onPress={handleSave}>
             <LinearGradient
-                colors={['#FF8C00', '#FF8C00']}
+                colors={[primaryColor, primaryColor]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={styles.saveButton}
+                style={[styles.saveButton, { shadowColor: primaryColor, shadowOffset: { width: 0, height: 6 } }]}
             >
                 <Text style={styles.saveText}>{language === 'Tamil' ? 'மாற்றங்களைச் சேமி' : 'Publish Prices'}</Text>
                 <Ionicons
@@ -292,10 +326,6 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: scale(32),
     borderBottomRightRadius: scale(32),
     elevation: 8,
-    shadowColor: "#FF8C00",
-    shadowOpacity: 0.2,
-    shadowOffset: { width: 0, height: 10 },
-    shadowRadius: 15,
     zIndex: 10,
   },
   backBtn: {
@@ -307,19 +337,35 @@ const styles = StyleSheet.create({
   headerTextContainer: { flex: 1 },
   headerTitle: { fontSize: moderateScale(22), fontWeight: "800", letterSpacing: 0.5 },
   headerSubtitle: { fontSize: moderateScale(13), fontWeight: "600", marginTop: 2 },
-  
   tableHeaderRow: {
     flexDirection: "row",
     paddingVertical: verticalScale(15),
     borderBottomWidth: 1,
   },
   headerCol: {
-    flex: 1,
     fontSize: moderateScale(11),
     fontWeight: "800",
     textAlign: "center",
     textTransform: "uppercase",
     letterSpacing: 1
+  },
+  headerPillContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingRight: scale(10)
+  },
+  typePill: {
+    paddingHorizontal: scale(10),
+    paddingVertical: verticalScale(4),
+    borderRadius: scale(8),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  typePillText: {
+    fontSize: moderateScale(10),
+    fontWeight: '900',
+    textTransform: 'uppercase',
   },
   
   scroll: { padding: scale(20), paddingBottom: verticalScale(120), paddingTop: 10 },
@@ -328,7 +374,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: verticalScale(12),
-    padding: scale(16),
+    padding: scale(12),
     borderRadius: scale(20),
     borderWidth: 1,
     elevation: 2,
@@ -338,43 +384,43 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
   },
   nameContainer: {
-    flex: 1.8,
+    flex: 1.6,
     justifyContent: "center",
-    paddingRight: scale(10)
+    paddingRight: scale(6)
   },
-  tamilName: { fontSize: moderateScale(17), fontWeight: "800", marginBottom: 2 },
-  englishName: { fontSize: moderateScale(12), fontWeight: "600" },
+  tamilName: { fontSize: moderateScale(16), fontWeight: "800", marginBottom: 2 },
+  englishName: { fontSize: moderateScale(11), fontWeight: "600" },
   
   inputsRow: {
     flexDirection: "row",
-    flex: 2,
-    gap: scale(12),
+    flex: 2.2,
+    gap: scale(10),
     justifyContent: "flex-end",
   },
   inputGroup: {
-    flexDirection: "row",
-    alignItems: "center",
     flex: 1,
-    justifyContent: "flex-end",
+    position: 'relative',
   },
-  currencyPrefix: {
-    fontSize: moderateScale(14),
-    fontWeight: "700",
-    color: "#94A3B8",
-    position: "absolute",
-    left: scale(8),
-    zIndex: 1,
+  inputPrefixBox: {
+    position: 'absolute',
+    left: scale(6),
+    top: verticalScale(6),
+    zIndex: 10,
+    width: scale(22),
+    height: scale(22),
+    borderRadius: scale(6),
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   priceInput: {
     width: "100%",
-    height: verticalScale(42),
-    borderWidth: 1,
+    height: verticalScale(46),
     borderRadius: scale(12),
-    paddingLeft: scale(22),
-    paddingRight: scale(8),
+    paddingLeft: scale(10),
+    paddingTop: verticalScale(12),
     textAlign: "center",
     fontSize: moderateScale(16),
-    fontWeight: "800",
+    fontWeight: "900",
   },
   
   bottomBar: {
@@ -392,8 +438,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     flexDirection: "row",
     elevation: 4,
-    shadowColor: "#FF8C00",
-    shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3,
     shadowRadius: 12,
   },

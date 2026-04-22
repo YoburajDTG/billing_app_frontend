@@ -8,9 +8,10 @@ import { SyncManager } from '@/utils/syncManager';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation, useRouter } from 'expo-router';
+import { useNavigation, useRouter, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
     Alert,
     FlatList,
@@ -26,7 +27,7 @@ import {
     View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ThermalPrinter } from '@/utils/thermalPrinter';
+import { ThermalPrinter, isPrinterAvailable } from '@/utils/thermalPrinter';
 import { NativeModules } from 'react-native';
 import * as Contacts from 'expo-contacts';
 import ViewShot, { captureRef } from 'react-native-view-shot';
@@ -207,12 +208,16 @@ export default function FunctionBillScreen() {
     const navigation = useNavigation();
     const router = useRouter();
     const insets = useSafeAreaInsets();
-    const { isDark, language } = useAppTheme();
+    const { isDark, language, primaryColor } = useAppTheme();
     const { user } = useAuth();
+
+    const { waitBillId } = useLocalSearchParams();
+    const [editingBillId, setEditingBillId] = useState<string | null>(null);
 
     // ── State ──
     const [vegetables, setVegetables] = useState<Vegetable[]>([]);
     const [cart, setCart] = useState<CartItem[]>([]);
+    const [isSaving, setIsSaving] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
 
     const [customerName, setCustomerName] = useState('');
@@ -228,11 +233,52 @@ export default function FunctionBillScreen() {
     const [pairedDevices, setPairedDevices] = useState<any[]>([]);
     const [isScanning, setIsScanning] = useState(false);
 
-    useEffect(() => {
-        navigation.setOptions({ headerShown: false });
-        loadVegetables();
-        loadSettings();
-    }, []);
+    useFocusEffect(
+        useCallback(() => {
+            loadVegetables();
+            loadSettings();
+            if (waitBillId && waitBillId !== editingBillId) {
+                loadBillForEditing(waitBillId as string);
+            }
+        }, [waitBillId]) // Removed editingBillId to avoid cycle
+    );
+
+    const loadBillForEditing = async (billId: string) => {
+        try {
+            const response = await billDbService.getWithItems(billId);
+            if (!response.data) return;
+            const billData = response.data;
+
+            setEditingBillId(billId);
+            setNextBillId(billId);
+            setCustomerName(billData.bill.customer_name || '');
+            setCustomerMobile(billData.bill.customer_mobile || '');
+            setDiscount(billData.bill.discount?.toString() || '0');
+            
+            // Extract event name from notes if present
+            if (billData.bill.notes && billData.bill.notes.startsWith('Event: ')) {
+                setEventName(billData.bill.notes.replace('Event: ', ''));
+            }
+
+            const restoredCart = billData.items.map(item => ({
+                id: item.vegetable_id || item.id,
+                name: item.name,
+                tamilName: item.tamil_name,
+                quantity: item.quantity.toString(),
+                price: item.unit_price.toString(),
+                total: item.total_price
+            }));
+            
+            // Ensure uniqueness to prevent duplication
+            const uniqueCart = Array.from(new Map(restoredCart.map(i => [i.id, i])).values());
+            setCart(uniqueCart);
+            // Clear param to avoid duplicate loads on re-focus
+            router.setParams({ waitBillId: undefined });
+        } catch (error) {
+            console.error('Error loading bill for editing:', error);
+            Alert.alert('Error', 'Failed to load bill data');
+        }
+    };
 
     const loadSettings = async () => {
         const pSize = await Storage.getItem(KEYS.PRINTER_SIZE);
@@ -259,6 +305,7 @@ export default function FunctionBillScreen() {
             }
         } catch (error) {
             console.error(error);
+            setIsSaving(false);
         }
     };
 
@@ -426,7 +473,7 @@ export default function FunctionBillScreen() {
     };
 
     // ── Colors ──
-    const primary = '#FF8C00';
+    const primary = primaryColor;
     const bg = isDark ? '#0F0F0F' : '#F5F3FF';
     const cardBg = isDark ? '#1C1C1E' : '#FFFFFF';
     const textCol = isDark ? '#F2F2F7' : '#1A1C1E';
@@ -552,18 +599,78 @@ export default function FunctionBillScreen() {
             setMobileError(true);
             return;
         }
-        try {
-            const { data } = await billDbService.getNextId();
-            setNextBillId(data);
-        } catch {
-            setNextBillId('FUNC-BILL');
+        
+        // Only fetch next ID if we are NOT editing an existing bill
+        if (!editingBillId) {
+            try {
+                const { data } = await billDbService.getNextId();
+                setNextBillId(data);
+            } catch {
+                setNextBillId('FUNC-BILL');
+            }
         }
+        
         setBillPreviewVisible(true);
     };
 
     const handleFinalize = () => {
         // Direct print using visible preference
         processBill(true, printerPreference);
+    };
+
+    const handleWaitBill = async () => {
+        if (!validCart.length || isSaving) {
+            if (!validCart.length) Alert.alert(language === 'Tamil' ? 'பிழை' : 'Error', 'Cart is empty');
+            return;
+        }
+        setIsSaving(true);
+        try {
+            const [mName, mNumber] = await Promise.all([
+                Storage.getItem(KEYS.MERCHANT_NAME),
+                Storage.getItem(KEYS.MERCHANT_NUMBER),
+            ]);
+            
+            const billData = {
+                shopName: mName || 'சுஜி காய்கறி கடை',
+                phone: mNumber || '9095938085',
+                customer_name: customerName || (language === 'Tamil' ? 'விழா வாடிக்கையாளர்' : 'Event Customer'),
+                customer_mobile: (customerMobile || "").trim().replace(/\D/g, ''),
+                billNumber: editingBillId || nextBillId,
+                date: new Date().toLocaleString('en-IN'),
+                mode: 'Function',
+                language,
+                payment_status: 'WAITING',
+                notes: eventName ? `Event: ${eventName}` : undefined,
+                items: validCart.map(i => ({
+                    vegetable_id: i.id,
+                    name: i.tamilName || i.name,
+                    tamilName: i.tamilName,
+                    quantity: parseFloat(i.quantity) || 0,
+                    unit_price: parseFloat(i.price) || 0,
+                    discount: 0,
+                    total_price: parseFloat(i.total.toFixed(2)),
+                })),
+                discount: discountAmt,
+                total_amount: parseFloat(grandTotal.toFixed(2)),
+            };
+
+            if (editingBillId) {
+                await billDbService.update(editingBillId, billData, billData.items);
+                Alert.alert(language === 'Tamil' ? 'வெற்றி' : 'Success', language === 'Tamil' ? 'பில் புதுப்பிக்கப்பட்டது' : 'Bill updated successfully');
+            } else {
+                await SyncManager.queueBill(billData);
+                Alert.alert(language === 'Tamil' ? 'வெற்றி' : 'Success', language === 'Tamil' ? 'பில் காத்திருப்பில் வைக்கப்பட்டது' : 'Bill parked in Wait List');
+            }
+            
+            setCart([]); setCustomerName(''); setCustomerMobile(''); setEventName(''); setDiscount('0'); 
+            setBillPreviewVisible(false);
+            setIsSaving(false);
+            setEditingBillId(null);
+            router.push('/shop/history');
+        } catch (err) {
+            console.error(err);
+            Alert.alert('Error', 'Could not save wait bill');
+        }
     };
 
     const handleWhatsAppShare = async () => {
@@ -638,13 +745,16 @@ export default function FunctionBillScreen() {
     };
 
     const processBill = async (printDirect: boolean, printerSize: '2inch' | '3inch' = '2inch') => {
-        if (mobileError) {
-            Alert.alert(
-                language === 'Tamil' ? 'பிழை' : 'Invalid Contact',
-                language === 'Tamil' ? 'சரியான 10 இலக்க எணனை உள்ளிடவும்' : 'Please enter a valid 10-digit mobile number'
-            );
+        if (mobileError || isSaving) {
+            if (mobileError) {
+                Alert.alert(
+                    language === 'Tamil' ? 'பிழை' : 'Invalid Contact',
+                    language === 'Tamil' ? 'சரியான 10 இலக்க எணனை உள்ளிடவும்' : 'Please enter a valid 10-digit mobile number'
+                );
+            }
             return;
         }
+        setIsSaving(true);
         try {
             const [mName, mNumber] = await Promise.all([
                 Storage.getItem(KEYS.MERCHANT_NAME),
@@ -653,27 +763,34 @@ export default function FunctionBillScreen() {
             const billData = {
                 shopName: mName || 'சுஜி காய்கறி கடை',
                 phone: mNumber || '9095938085',
-                userName: customerName || (language === 'Tamil' ? 'விழா வாடிக்கையாளர்' : 'Event Customer'),
-                customerPhone: customerMobile || undefined,
-                billNumber: nextBillId,
+                customer_name: customerName || (language === 'Tamil' ? 'விழா வாடிக்கையாளர்' : 'Event Customer'),
+                customer_mobile: (customerMobile || "").trim().replace(/\D/g, ''),
+                billNumber: editingBillId || nextBillId,
                 date: new Date().toLocaleString('en-IN'),
                 mode: 'Function',
                 language,
+                payment_status: 'PAID',
                 notes: eventName ? `Event: ${eventName}` : undefined,
                 items: validCart.map(i => ({
-                    id: i.id,
+                    vegetable_id: i.id,
                     name: i.tamilName || i.name,
                     tamilName: i.tamilName,
                     quantity: parseFloat(i.quantity) || 0,
-                    price: parseFloat(i.price) || 0,
+                    unit_price: parseFloat(i.price) || 0,
                     discount: 0,
-                    total: parseFloat(i.total.toFixed(2)),
+                    total_price: parseFloat(i.total.toFixed(2)),
                 })),
-                subTotal: parseFloat(subtotal.toFixed(2)),
                 discount: discountAmt,
-                grandTotal: parseFloat(grandTotal.toFixed(2)),
+                total_amount: parseFloat(grandTotal.toFixed(2)),
             };
-            const savedBill = await SyncManager.queueBill(billData);
+
+            let savedBill;
+            if (editingBillId) {
+                await billDbService.update(editingBillId, billData, billData.items);
+                savedBill = { id: editingBillId };
+            } else {
+                savedBill = await SyncManager.queueBill(billData);
+            }
             
             if (isPrinterConnected) {
                 await ThermalPrinter.printReceipt({
@@ -696,18 +813,21 @@ export default function FunctionBillScreen() {
             
             Alert.alert('Success', 'Bill saved successfully!');
             setCart([]); setCustomerName(''); setCustomerMobile(''); setEventName(''); setDiscount('0'); setBillPreviewVisible(false);
+            setEditingBillId(null);
+            setIsSaving(false);
         } catch (err) {
             console.error(err);
+            setIsSaving(false);
             Alert.alert('Error', 'Could not complete bill');
         }
     };
 
     return (
         <View style={[styles.root, { backgroundColor: bg }]}>
-            <StatusBar style="light" backgroundColor="#FF8C00" />
+            <StatusBar style="light" backgroundColor={primaryColor} />
             
-            <LinearGradient colors={isDark ? ['#1A1A1A', '#1A1A1A'] : ['#FF8C00', '#FF8C00']} style={[styles.header, { paddingTop: insets.top + (Platform.OS === 'android' ? verticalScale(14) : verticalScale(8)) }]}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}><Ionicons name="arrow-back" size={22} color="#FF8C00" /></TouchableOpacity>
+            <LinearGradient colors={isDark ? ['#1A1A1A', '#1A1A1A'] : [primaryColor, primaryColor]} style={[styles.header, { paddingTop: insets.top + (Platform.OS === 'android' ? verticalScale(14) : verticalScale(8)) }]}>
+                <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}><Ionicons name="arrow-back" size={22} color={primaryColor} /></TouchableOpacity>
                 <View style={{ flex: 1, marginLeft: scale(10) }}>
                     <Text style={styles.headerTitle}>{language === 'Tamil' ? 'விழா பில்' : 'Function Bill'}</Text>
                     <Text style={styles.headerSub}>{language === 'Tamil' ? 'திருமணம் & நிகழ்வு பில்லிங்' : 'Marriage & Event Billing'}</Text>
@@ -741,10 +861,10 @@ export default function FunctionBillScreen() {
                         scanPrinters();
                         setShowPrinterModal(true);
                     }}
-                    style={[styles.printerStatus, { backgroundColor: isPrinterConnected ? '#FF8C0020' : '#EF444420', borderColor: isPrinterConnected ? '#FF8C00' : '#EF4444' }]}
+                    style={[styles.printerStatus, { backgroundColor: isPrinterConnected ? primaryColor + '20' : '#EF444420', borderColor: isPrinterConnected ? primaryColor : '#EF4444' }]}
                 >
-                    <MaterialCommunityIcons name={isPrinterConnected ? 'printer-check' : 'printer-off'} size={14} color={isPrinterConnected ? '#FF8C00' : '#EF4444'} />
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: isPrinterConnected ? '#FF8C00' : '#EF4444', marginLeft: 4 }}>
+                    <MaterialCommunityIcons name={isPrinterConnected ? 'printer-check' : 'printer-off'} size={14} color={isPrinterConnected ? primaryColor : '#EF4444'} />
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: isPrinterConnected ? primaryColor : '#EF4444', marginLeft: 4 }}>
                         {isPrinterConnected ? 'PRINTER CONNECTED' : 'CONNECT PRINTER'}
                     </Text>
                 </TouchableOpacity>
@@ -789,40 +909,96 @@ export default function FunctionBillScreen() {
 
             <Modal visible={billPreviewVisible} animationType="slide">
                 <SafeAreaView style={[styles.invoiceContainer, { backgroundColor: bg }]}>
-                    <LinearGradient colors={isDark ? ['#1A1A1A', '#1A1A1A'] : ['#FF8C00', '#FF8C00']} style={[styles.invoiceFixedHeader, { paddingTop: insets.top + (Platform.OS === 'android' ? 14 : 8) }]}>
+                    <LinearGradient colors={isDark ? ['#1A1A1A', '#1A1A1A'] : [primaryColor, primaryColor]} style={[styles.invoiceFixedHeader, { paddingTop: insets.top + (Platform.OS === 'android' ? 14 : 8) }]}>
                         <View style={styles.invoiceHeaderNav}>
-                            <TouchableOpacity onPress={() => setBillPreviewVisible(false)} style={styles.closeBtnCircle}><Ionicons name="arrow-back" size={20} color="#FF8C00" /></TouchableOpacity>
+                            <TouchableOpacity onPress={() => setBillPreviewVisible(false)} style={styles.closeBtnCircle}><Ionicons name="arrow-back" size={20} color={primaryColor} /></TouchableOpacity>
                             <View style={{ flex: 1, marginLeft: 12 }}>
-                                <Text style={styles.invoiceHeaderTitle}>Bill Preview</Text>
-                                <Text style={styles.invoiceHeaderSub}>Marriage & Event</Text>
+                                <Text style={styles.invoiceHeaderTitle}>{language === 'Tamil' ? 'பில் முன்னோட்டம்' : 'Bill Preview'}</Text>
+                                <Text style={styles.invoiceHeaderSub}>{language === 'Tamil' ? 'திருமணம் & நிகழ்வு' : 'Marriage & Event'}</Text>
                             </View>
+                            
+                            <TouchableOpacity 
+                                activeOpacity={0.7}
+                                onPress={() => {
+                                    scanPrinters();
+                                    setShowPrinterModal(true);
+                                }}
+                                style={[
+                                    { 
+                                        flexDirection: 'row', 
+                                        alignItems: 'center', 
+                                        paddingHorizontal: scale(8), 
+                                        paddingVertical: 4, 
+                                        borderRadius: 20, 
+                                        borderWidth: 1.5,
+                                        marginRight: 10,
+                                        gap: 4,
+                                        backgroundColor: isPrinterConnected ? '#4ADE8030' : '#F8717130',
+                                        borderColor: isPrinterConnected ? '#4ADE80' : '#F87171',
+                                    }
+                                ]}
+                            >
+                                <MaterialCommunityIcons 
+                                    name={isPrinterConnected ? "printer-check" : "printer-off"} 
+                                    size={12} 
+                                    color={isPrinterConnected ? '#4ADE80' : '#F87171'} 
+                                />
+                                <Text style={{ fontSize: 10, fontWeight: '900', color: isPrinterConnected ? '#4ADE80' : '#F87171' }}>
+                                    {isPrinterConnected ? 'ON' : 'OFF'}
+                                </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                onPress={handleWaitBill}
+                                disabled={isSaving}
+                                style={[
+                                    styles.closeBtnCircle, 
+                                    { 
+                                        width: 'auto', 
+                                        paddingHorizontal: scale(12), 
+                                        backgroundColor: isSaving ? '#CCC' : '#FF9800', 
+                                        borderRadius: scale(10),
+                                        flexDirection: 'row',
+                                        gap: 6,
+                                        elevation: 4,
+                                        opacity: isSaving ? 0.7 : 1,
+                                    }
+                                ]}
+                            >
+                                <MaterialCommunityIcons name="clock-outline" size={18} color="#FFF" />
+                                <Text style={{ color: '#FFF', fontWeight: '900', fontSize: moderateScale(11) }}>
+                                    {isSaving ? '...' : (language === 'Tamil' ? 'காத்திருப்பு' : 'Wait Bill')}
+                                </Text>
+                            </TouchableOpacity>
                         </View>
                     </LinearGradient>
 
+                    {/* Invisible capture component outside ScrollView */}
+                    <View 
+                        pointerEvents="none"
+                        style={{ 
+                            position: 'absolute', 
+                            top: 0, 
+                            left: 0, 
+                            opacity: 0.01,
+                            zIndex: -999,
+                            width: 450,
+                        }} 
+                    >
+                        <ThermalReceiptView 
+                            name={customerName}
+                            mobile={customerMobile}
+                            billId={nextBillId}
+                            date={new Date().toLocaleString('en-IN')}
+                            cart={validCart}
+                            total={subtotal}
+                            grandTotal={grandTotal}
+                            shopName={user?.shopName}
+                            shopPhone={user?.phone}
+                        />
+                    </View>
+
                     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }} showsVerticalScrollIndicator={false}>
-                        <View 
-                            pointerEvents="none"
-                            style={{ 
-                                position: 'absolute', 
-                                top: 0, 
-                                left: 0, 
-                                opacity: 0.05, 
-                                zIndex: -100,
-                                width: 400,
-                            }} 
-                        >
-                            <ThermalReceiptView 
-                                name={customerName}
-                                mobile={customerMobile}
-                                billId={nextBillId}
-                                date={new Date().toLocaleString('en-IN')}
-                                cart={validCart}
-                                total={subtotal}
-                                grandTotal={grandTotal}
-                                shopName={user?.shopName}
-                                shopPhone={user?.phone}
-                            />
-                        </View>
                         <ViewShot ref={viewShotRef} options={{ format: "jpg", quality: 0.9 }} style={{ backgroundColor: bg, padding: 8 }}>
                         <View style={styles.quickStatsRow}>
                             <View style={[styles.quickStatCard, { backgroundColor: cardBg, borderColor: borderCol }]}>
@@ -885,14 +1061,15 @@ export default function FunctionBillScreen() {
                         </TouchableOpacity>
 
                         <TouchableOpacity 
-                            style={[styles.generateBtn, { backgroundColor: primary, flex: 1, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 15 }]} 
+                            style={[styles.generateBtn, { backgroundColor: isSaving ? '#CCC' : primary, flex: 1, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 15 }]} 
                             onPress={handleFinalize} 
+                            disabled={isSaving}
                             activeOpacity={0.8}
                         >
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                                 <MaterialCommunityIcons name="printer-check" size={24} color="#FFF" />
                                 <Text style={[styles.generateBtnText, { fontSize: moderateScale(14) }]}>
-                                    {language === 'Tamil' ? `அச்சிடு (${printerPreference === '2inch' ? '2"' : '3"'})` : `Print (${printerPreference === '2inch' ? '2"' : '3"'})`}
+                                    {isSaving ? '...' : (language === 'Tamil' ? `அச்சிடு (${printerPreference === '2inch' ? '2"' : '3"'})` : `Print (${printerPreference === '2inch' ? '2"' : '3"'})`)}
                                 </Text>
                             </View>
 
@@ -938,11 +1115,42 @@ export default function FunctionBillScreen() {
                                     <MaterialCommunityIcons name="bluetooth" size={20} color={primary} />
                                 </TouchableOpacity>
                             )}
-                            ListEmptyComponent={
-                                <View style={{ padding: 20, alignItems: 'center' }}>
-                                    <Text style={{ color: subCol }}>{isScanning ? 'Scanning...' : 'No paired printers found'}</Text>
-                                </View>
-                            }
+                                    ListEmptyComponent={
+                                        <View style={{ padding: 25, alignItems: 'center', justifyContent: 'center' }}>
+                                            <MaterialCommunityIcons 
+                                                name={!isPrinterAvailable ? "alert-circle-outline" : "bluetooth-off"} 
+                                                size={42} 
+                                                color="#CCC" 
+                                            />
+                                            <Text style={{ 
+                                                color: textCol, 
+                                                fontWeight: '800', 
+                                                fontSize: 14, 
+                                                marginTop: 10,
+                                                textAlign: 'center' 
+                                            }}>
+                                                {!isPrinterAvailable 
+                                                    ? (language === 'Tamil' ? 'பிரிண்டர் மாட்யூல் கிடைக்கவில்லை' : 'Printer Module Not Found') 
+                                                    : (language === 'Tamil' ? 'பிரிண்டர் எதுவும் கிடைக்கவில்லை' : 'No Printers Found')}
+                                            </Text>
+                                            <Text style={{ 
+                                                color: subCol, 
+                                                fontSize: 12, 
+                                                marginTop: 6, 
+                                                textAlign: 'center',
+                                                lineHeight: 16 
+                                            }}>
+                                                {!isPrinterAvailable 
+                                                    ? (language === 'Tamil' 
+                                                       ? 'Expo Go-வில் பிரிண்டர் வேலை செய்யாது.' 
+                                                       : 'Printer search doesn\'t work in Expo Go.')
+                                                    : (language === 'Tamil'
+                                                       ? 'Bluetooth மற்றும் Pairing செட்டிங்ஸை சரிபார்க்கவும்.'
+                                                       : 'Check Bluetooth and System Pairing settings.')
+                                                }
+                                            </Text>
+                                        </View>
+                                    }
                         />
                         
                         <TouchableOpacity 
