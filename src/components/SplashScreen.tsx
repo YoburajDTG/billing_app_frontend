@@ -12,7 +12,7 @@ import { useAppTheme } from '@/context/ThemeContext';
 const SplashScreen = () => {
     const router = useRouter();
     const { isDark } = useAppTheme();
-    
+
     // Animation constants using useRef for stability
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const scaleAnim = useRef(new Animated.Value(0.9)).current;
@@ -41,24 +41,23 @@ const SplashScreen = () => {
         return () => clearTimeout(timer);
     }, [fadeAnim, router, scaleAnim]);
 
-    // Clean background matches the app's dark/light theme
-    const backgroundColor = isDark ? '#121212' : '#FFFFFF';
+    // Clean background matches the white native splash screen
+    const backgroundColor = '#FFFFFF';
 
     return (
         <View style={[styles.container, { backgroundColor }]}>
-            <Animated.View 
+            <Animated.View
                 style={[
-                    styles.logoWrapper,
-                    { 
+                    styles.fullScreenWrapper,
+                    {
                         opacity: fadeAnim,
-                        transform: [{ scale: scaleAnim }]
                     }
                 ]}
             >
                 <Image
-                    source={require('@/assets/images/icon.png')}
-                    style={styles.logo}
-                    resizeMode="contain"
+                    source={require('@/assets/images/splash.png')}
+                    style={styles.fullScreenImage}
+                    resizeMode="cover"
                 />
             </Animated.View>
         </View>
@@ -71,13 +70,11 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
-    logoWrapper: {
-        width: scale(280),
-        height: scale(280),
-        justifyContent: 'center',
-        alignItems: 'center',
+    fullScreenWrapper: {
+        width: '100%',
+        height: '100%',
     },
-    logo: {
+    fullScreenImage: {
         width: '100%',
         height: '100%',
     },

@@ -5,6 +5,7 @@ import { TAMIL } from '@/constants/Tamil';
 import { ENGLISH } from '@/constants/English';
 
 export const THEME_COLORS = [
+    { name: 'Brand Blue', color: '#1E3A8A' },
     { name: 'Orange', color: '#FF8C00' },
     { name: 'Blue', color: '#2563EB' },
     { name: 'Green', color: '#059669' },

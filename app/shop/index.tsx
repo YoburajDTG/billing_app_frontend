@@ -1,6 +1,6 @@
 import { SOUTHERN_VEGETABLES } from "@/constants/Vegetables";
 import { useAuth } from "@/context/AuthContext";
-import { useAppTheme } from "@/context/ThemeContext";
+import { useAppTheme, THEME_COLORS } from "@/context/ThemeContext";
 import { inventoryDbService, vegetableDbService, billDbService } from "@/services/dbService";
 import { KEYS, Storage } from "@/services/storage";
 import { getVegetableImage } from "@/utils/imageHelper";
@@ -177,8 +177,8 @@ export default function ShopScreen() {
 
   const handleConnectPrinter = async (address: string) => {
     try {
-      const success = await ThermalPrinter.connect(address);
-      if (success) {
+      const res = await ThermalPrinter.connectPrinter(address);
+      if (res.success) {
         setIsPrinterConnected(true);
         setShowPrinterModal(false);
         const devices = await ThermalPrinter.getPairedDevices();
@@ -193,10 +193,24 @@ export default function ShopScreen() {
   };
 
   const scanPrinters = async () => {
+    if (!isPrinterAvailable) {
+      Alert.alert('Module Error', 'Thermal printer module is not available in this build. Please ensure you are using the installed APK and not Expo Go.');
+      return;
+    }
+
     setIsScanning(true);
-    const devices = await ThermalPrinter.discoverDevices();
-    setPairedDevices(devices);
-    setIsScanning(false);
+    try {
+      const devices = await ThermalPrinter.discoverDevices();
+      if (devices.length === 0) {
+        Alert.alert('No Devices', 'No Bluetooth printers found. Please:\n1. Turn ON Bluetooth & Location (GPS)\n2. Pair the printer in Phone Settings first.');
+      }
+      setPairedDevices(devices);
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Scan Error', 'Failed to scan for Bluetooth devices.');
+    } finally {
+      setIsScanning(false);
+    }
   };
 
   useEffect(() => {
@@ -612,6 +626,21 @@ export default function ShopScreen() {
           await SyncManager.queueBill(billData);
       }
 
+      // 📸 CAPTURE IMAGE FOR PRINTING (Ensures Tamil support)
+      let printImageUri = null;
+      if (isPrinterConnected && thermalShotRef.current) {
+        try {
+          const captureWidth = printerPreference === '2inch' ? 384 : 576;
+          printImageUri = await thermalShotRef.current.capture({
+            format: 'png', // User requested png for transparency/quality
+            quality: 1,
+            width: captureWidth
+          });
+        } catch (captureErr) {
+          console.warn('Failed to capture receipt image:', captureErr);
+        }
+      }
+
       // 🔄 AUTO PRINT LOGIC
       setCart([]);
       setBillPreviewVisible(false);
@@ -619,17 +648,11 @@ export default function ShopScreen() {
       setDiscount("");
       setNextBillId("");
       
-      // Attempt auto print if enabled
-      await ThermalPrinter.autoPrintAfterSave({
-        shopName: billData.shopName,
-        billId: billData.billNumber,
-        date: billData.date,
-        items: billData.items,
-        totalAmount: billData.grandTotal,
-        customerName: billData.userName,
-        shopPhone: billData.phone,
-        shopAddress: billData.address
-      });
+      // Attempt auto print if enabled (Image mode only)
+      if (printImageUri) {
+          const receiptWidth = printerPreference === '2inch' ? 384 : 576;
+          await ThermalPrinter.printImage(printImageUri, receiptWidth);
+      }
 
       Alert.alert(
         language === 'Tamil' ? 'வெற்றி' : "Success", 
@@ -738,27 +761,18 @@ export default function ShopScreen() {
         if (status === 'granted') {
             const contactResult = await Contacts.presentContactPickerAsync();
             if (contactResult) {
-                // To be absolute sure we get all details, fetch by ID
                 const contact = await Contacts.getContactByIdAsync(contactResult.id);
-                
                 if (contact) {
-                    // Extract Name
                     let displayName = contact.name;
                     if (!displayName || displayName === 'undefined') {
                         displayName = [contact.firstName, contact.middleName, contact.lastName].filter(Boolean).join(' ');
                     }
                     if (displayName && displayName !== 'undefined') setCustomerName(displayName);
-    if (contact.phoneNumbers && contact.phoneNumbers.length > 0) {
-                        // Priority: mobile > home > work > first available
-                        const mobileObj = contact.phoneNumbers.find(p => p.label === 'mobile' || p.label === 'Mobile') || contact.phoneNumbers[0];
-                        const rawNumber = mobileObj.number || '';
-                        const digits = rawNumber.replace(/\D/g, '').slice(-10);
-                        if (digits) setCustomerMobile(digits);
+                    if (contact.phoneNumbers && contact.phoneNumbers.length > 0) {
+                      setCustomerMobile(contact.phoneNumbers[0].number || '');
                     }
                 }
             }
-        } else {
-            Alert.alert('Permission Denied', 'Please allow contact access to pick a customer.');
         }
     } catch (error: any) {
         console.error('Contact picker error:', error);
@@ -769,70 +783,148 @@ export default function ShopScreen() {
   const thermalShotRef = useRef<any>(null);
   const viewShotRef = useRef<any>(null);
 
-  const ThermalReceiptView = ({ name, mobile, billId, date, cart, total, disc, shopName, shopPhone }: any) => (
-    <ViewShot 
-      ref={thermalShotRef} 
-      options={{ format: 'png', quality: 1.0 }} 
-      style={styles.thermalCaptureContainer}
-    >
-      <View style={styles.thermalContent}>
-        <Text style={styles.thermalShopName}>{shopName || "சுஜி காய்கறி கடை"}</Text>
-        <Text style={styles.thermalShopLoc}>{shopAddress || "பாண்டி - திண்டிவனம் மெயின் ரோடு, கிளியனூர்."}</Text>
-        <Text style={styles.thermalShopContact}>{language === 'Tamil' ? 'போன்' : 'Ph'}: {shopPhone || "9095938085"}</Text>
-        
-        <Text style={styles.thermalDivider}>------------------------------------------</Text>
-        
-        <View style={styles.thermalRow}>
-          <Text style={styles.thermalText}>Date: {date}</Text>
-        </View>
-        <View style={styles.thermalRow}>
-          <Text style={styles.thermalText}>Bill No: {billId}</Text>
-        </View>
-        <View style={styles.thermalRow}>
-          <Text style={styles.thermalText}>Customer: {name || (language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Walk-in Customer')}</Text>
-        </View>
+  const ThermalReceiptView = ({ name, mobile, billId, date, cart, total, disc, shopName, shopPhone, width }: any) => {
+    const is3Inch = width >= 576;
+    const receiptWidth = is3Inch ? 576 : 384; 
+    
+    // Scale for crispness
+    const scale = is3Inch ? 1.6 : 1.3;
+    
+    const PAD = 10 * scale; // Clean padding
+    const COL_QTY = is3Inch ? 90 : 65;
+    const COL_AMT = is3Inch ? 140 : 100;
+    const COL_ITEM = receiptWidth - (PAD * 2) - COL_QTY - COL_AMT;
 
-        <View style={[styles.thermalRow, { marginTop: 10, borderBottomWidth: 2, borderBottomColor: '#000', paddingBottom: 5 }]}>
-          <Text style={[styles.thermalHeader, { flex: 2 }]}>Item</Text>
-          <Text style={[styles.thermalHeader, { flex: 1, textAlign: 'center' }]}>Qty</Text>
-          <Text style={[styles.thermalHeader, { flex: 1, textAlign: 'right' }]}>Total</Text>
-        </View>
+    return (
+      <ViewShot 
+        ref={thermalShotRef} 
+        options={{ format: 'png', quality: 1, width: receiptWidth }} 
+        style={{ width: receiptWidth, backgroundColor: '#FFFFFF' }}
+      >
+        <View style={{ 
+          width: receiptWidth,
+          backgroundColor: '#FFFFFF',
+          paddingHorizontal: PAD,
+          paddingVertical: 20 * scale,
+          alignSelf: 'flex-start'
+        }}>
+          {/* --- HEADER --- */}
+          <Text style={{ textAlign: 'center', fontSize: 26 * scale, fontWeight: '900', color: '#000', letterSpacing: 1 }}>
+              {shopName || "சுஜி காய்கறி கடை"}
+          </Text>
+          <Text style={{ textAlign: 'center', color: '#222', fontSize: 13 * scale, fontWeight: '500', marginTop: 6 * scale }}>
+              {shopAddress || "பாண்டி - திண்டிவனம் மெயின் ரோடு, கிளியனூர்."}
+          </Text>
+          <Text style={{ textAlign: 'center', color: '#000', fontSize: 14 * scale, fontWeight: '700', marginTop: 4 * scale, marginBottom: 10 * scale }}>
+              Phone: {shopPhone || "9095938085"}
+          </Text>
 
-        {cart.map((item: any, idx: number) => (
-          <View key={idx} style={styles.thermalItemRow}>
-            <View style={{ flex: 2 }}>
-              <Text style={styles.thermalItemName}>{item.tamilName || item.name}</Text>
-              <Text style={styles.thermalItemSub}>₹{item.price}/kg</Text>
+          {/* --- META INFO --- */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 * scale, marginBottom: 4 * scale }}>
+            <Text style={{ color: '#000', fontSize: 14 * scale, fontWeight: '700' }}>No: {billId}</Text>
+            <Text style={{ color: '#000', fontSize: 14 * scale, fontWeight: '700' }}>Date: {date.split(',')[0]}</Text>
+          </View>
+          <Text style={{ color: '#000', fontSize: 14 * scale, fontWeight: '700', marginBottom: 14 * scale }}>
+            Customer: {name || (language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Walk-in')}
+          </Text>
+  
+          {/* --- TABLE HEADER --- */}
+          <View style={{ 
+            flexDirection: 'row', 
+            paddingVertical: 8 * scale, 
+            borderTopWidth: 2 * scale, 
+            borderBottomWidth: 2 * scale,
+            borderColor: '#000',
+            marginBottom: 8 * scale
+          }}>
+            <Text style={{ width: COL_ITEM, fontWeight: 'bold', color: '#000', fontSize: 14 * scale }}>ITEM</Text>
+            <Text style={{ width: COL_QTY, textAlign: 'center', fontWeight: 'bold', color: '#000', fontSize: 14 * scale }}>QTY</Text>
+            <Text style={{ width: COL_AMT, textAlign: 'right', fontWeight: 'bold', color: '#000', fontSize: 14 * scale }}>AMOUNT</Text>
+          </View>
+  
+          {/* --- ITEMS --- */}
+          {cart.map((item: any, i: number) => (
+            <View key={i} style={{ 
+              flexDirection: 'row', 
+              paddingVertical: 8 * scale,
+            }}>
+              <Text style={{
+                width: COL_ITEM,
+                color: '#000',
+                fontSize: 16 * scale,
+                fontWeight: 'bold',
+              }}>
+                {item.tamilName || item.name}
+              </Text>
+
+              <Text style={{ 
+                width: COL_QTY, 
+                textAlign: 'center', 
+                color: '#000', 
+                fontSize: 16 * scale,
+                fontWeight: '600'
+              }}>
+                {item.quantity}
+              </Text>
+
+              <Text style={{ 
+                width: COL_AMT, 
+                textAlign: 'right', 
+                color: '#000', 
+                fontSize: 16 * scale,
+                fontWeight: '900'
+              }}>
+                {item.total.toFixed(0)}
+              </Text>
             </View>
-            <Text style={[styles.thermalItemData, { flex: 1, textAlign: 'center' }]}>{item.quantity}kg</Text>
-            <Text style={[styles.thermalItemData, { flex: 1, textAlign: 'right' }]}>₹{item.total.toFixed(0)}</Text>
+          ))}
+  
+          <View style={{ borderTopWidth: 1.5 * scale, borderTopColor: '#000', borderStyle: 'dashed', marginTop: 12 * scale, paddingTop: 12 * scale }}>
+            {/* --- TOTALS --- */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 * scale }}>
+              <Text style={{ fontSize: 15 * scale, color: '#000', fontWeight: '600' }}>Sub Total</Text>
+              <Text style={{ fontSize: 15 * scale, color: '#000', fontWeight: '800' }}>₹{total.toFixed(0)}</Text>
+            </View>
+            
+            {parseFloat(disc) > 0 && (
+               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 * scale }}>
+                  <Text style={{ fontSize: 15 * scale, color: '#444', fontWeight: '600' }}>Discount</Text>
+                  <Text style={{ fontSize: 15 * scale, color: '#000', fontWeight: '800' }}>-₹{parseFloat(disc).toFixed(0)}</Text>
+               </View>
+            )}
+
+            <View style={{ 
+              flexDirection: 'row', 
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginTop: 6 * scale,
+              paddingVertical: 10 * scale,
+              borderTopWidth: 2 * scale,
+              borderBottomWidth: 2 * scale,
+              borderColor: '#000',
+            }}>
+              <Text style={{ fontWeight: '900', color: '#000', fontSize: 20 * scale }}>TOTAL</Text>
+              <Text style={{ fontWeight: '900', color: '#000', fontSize: 24 * scale }}>₹{(total - (parseFloat(disc) || 0)).toFixed(0)}</Text>
+            </View>
           </View>
-        ))}
-
-        <Text style={styles.thermalDivider}>------------------------------------------</Text>
-        
-        <View style={styles.thermalSummaryRow}>
-          <Text style={styles.thermalSummaryLabel}>Sub-Total:</Text>
-          <Text style={styles.thermalSummaryValue}>₹{total.toFixed(0)}</Text>
-        </View>
-
-        {parseFloat(disc) > 0 && (
-          <View style={styles.thermalSummaryRow}>
-            <Text style={styles.thermalSummaryLabel}>Discount:</Text>
-            <Text style={styles.thermalSummaryValue}>- ₹{parseFloat(disc).toFixed(0)}</Text>
+  
+          {/* --- FOOTER --- */}
+          <View style={{ marginTop: 30 * scale, alignItems: 'center' }}>
+            <Text style={{
+                fontSize: 20 * scale,
+                fontWeight: '900',
+                color: '#000',
+            }}>
+                நன்றி! மீண்டும் வருக.
+            </Text>
+            <Text style={{ fontSize: 13 * scale, color: '#555', fontWeight: '600', marginTop: 6 * scale }}>
+                Thank you! Visit again.
+            </Text>
           </View>
-        )}
-
-        <View style={[styles.thermalSummaryRow, { borderBottomWidth: 3, borderBottomColor: '#000', paddingBottom: 5 }]}>
-          <Text style={[styles.thermalSummaryLabel, { fontSize: 24, paddingVertical: 5 }]}>Grand Total:</Text>
-          <Text style={[styles.thermalSummaryValue, { fontSize: 24, paddingVertical: 5 }]}>₹{(total - (parseFloat(disc) || 0)).toFixed(0)}</Text>
         </View>
-        
-        <Text style={[styles.thermalShopLoc, { marginTop: 20, fontStyle: 'italic' }]}>நன்றி! மீண்டும் வருக.</Text>
-      </View>
-    </ViewShot>
-  );
-
+      </ViewShot>
+    );
+  };
   const handleShareImage = async () => {
     try {
       if (!thermalShotRef.current) {
@@ -854,7 +946,7 @@ export default function ShopScreen() {
         if (hasNativeShare && cleanPhone.length >= 10) {
           try {
             const Share = require('react-native-share').default;
-            const FileSystem = require('expo-file-system');
+            const FileSystem = require('expo-file-system/legacy');
             
             const targetPhone = `+91${cleanPhone.slice(-10)}`;
             console.log('Direct Target Injection:', targetPhone);
@@ -1294,7 +1386,7 @@ export default function ShopScreen() {
         ]}
       >
         <View style={styles.headerTitleRow}>
-          <View>
+          <View style={{ flex: 1 }}>
             <Text
               style={[styles.shopTitle, { color: isDark ? textColor : "#FFF" }]}
             >
@@ -1335,6 +1427,12 @@ export default function ShopScreen() {
             </View>
           </View>
 
+          <TouchableOpacity
+            onPress={() => setSettingsMenuVisible(true)}
+            style={[styles.headerActionBtn, { backgroundColor: isDark ? '#2C2C2E' : 'rgba(255,255,255,0.2)' }]}
+          >
+            <Ionicons name="settings-outline" size={22} color="#FFF" />
+          </TouchableOpacity>
         </View>
       </LinearGradient>
 
@@ -1397,6 +1495,32 @@ export default function ShopScreen() {
                     {language === "Tamil" ? "வாடிக்கையாளர் விவரங்கள்" : "Customer Details"}
                   </Text>
                 </TouchableOpacity>
+
+                <View
+                  style={[
+                    styles.menuDivider,
+                    { backgroundColor: isDark ? "#333" : "#F0F0F0" },
+                  ]}
+                />
+
+                <View style={styles.menuColorSection}>
+                  <Text style={[styles.menuSectionLabel, { color: labelColor }]}>
+                    {language === 'Tamil' ? 'தீம் நிறம்' : 'Theme Color'}
+                  </Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.menuColorList}>
+                    {THEME_COLORS.map((item: any) => (
+                      <TouchableOpacity
+                        key={item.color}
+                        onPress={() => setPrimaryColor(item.color)}
+                        style={[
+                          styles.menuColorCircle,
+                          { backgroundColor: item.color },
+                          primaryColor === item.color && styles.menuColorActive
+                        ]}
+                      />
+                    ))}
+                  </ScrollView>
+                </View>
               </Animated.View>
             </TouchableWithoutFeedback>
           </View>
@@ -1892,16 +2016,15 @@ export default function ShopScreen() {
             </View>
           </LinearGradient>
 
-            {/* Invisible but active capture component - placed outside scroll for better results */}
+            {/* Dynamic capture component based on printer size */}
             <View 
               pointerEvents="none"
               style={{ 
                 position: 'absolute', 
                 top: 0, 
-                left: 0, 
-                opacity: 0.01, 
+                left: -5000, 
                 zIndex: -999, 
-                width: 450,
+                width: printerPreference === '2inch' ? 384 : 576,
               }} 
             >
               <ThermalReceiptView 
@@ -1915,6 +2038,7 @@ export default function ShopScreen() {
                  shopName={shopName}
                  shopPhone={shopPhone}
                  shopAddress={shopAddress}
+                 width={printerPreference === '2inch' ? 384 : 576}
               />
             </View>
 
@@ -3528,26 +3652,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.3)',
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    padding: 20,
-  },
   printerModal: {
     borderRadius: 20,
     padding: 20,
     maxHeight: '80%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
   },
   deviceRow: {
     flexDirection: 'row',
@@ -3575,9 +3683,9 @@ const styles = StyleSheet.create({
     marginLeft: scale(10),
   },
   thermalCaptureContainer: {
-    width: 400, // Fixed width for consistent capture
+    width: 384, // Standard 58mm width
     backgroundColor: '#FFF',
-    padding: 20,
+    padding: 10,
   },
   thermalContent: {
     backgroundColor: '#FFF',
@@ -3660,5 +3768,47 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '900',
     color: '#000',
+  },
+  thermalLineDivider: {
+    height: 1,
+    backgroundColor: '#000',
+    width: '100%',
+  },
+  headerActionBtn: {
+    width: scale(40),
+    height: scale(40),
+    borderRadius: scale(12),
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: scale(10),
+  },
+  menuColorSection: {
+    padding: scale(15),
+  },
+  menuSectionLabel: {
+    fontSize: moderateScale(12),
+    fontWeight: '800',
+    marginBottom: verticalScale(10),
+    textTransform: 'uppercase',
+  },
+  menuColorList: {
+    gap: scale(10),
+    paddingRight: 20,
+  },
+  menuColorCircle: {
+    width: scale(30),
+    height: scale(30),
+    borderRadius: scale(15),
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  menuColorActive: {
+    borderColor: '#FFF',
+    borderWidth: 2,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
   },
 });

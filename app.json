@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "சுஜி காய்கறி கடை",
+    "name": "SujiBill",
     "slug": "veg-billing-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -13,10 +13,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./src/assets/images/android-icon-foreground.png",
-        "backgroundImage": "./src/assets/images/android-icon-background.png",
-        "monochromeImage": "./src/assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./src/assets/images/logo_icon.png"
       },
       "package": "com.yoburaj.vegbillingapp",
       "edgeToEdgeEnabled": true,
@@ -40,12 +38,11 @@
       [
         "expo-splash-screen",
         {
-          "image": "./src/assets/images/splash-icon.png",
-          "imageWidth": 200,
+          "image": "./src/assets/images/logo_icon.png",
           "resizeMode": "contain",
-          "backgroundColor": "#121212",
+          "backgroundColor": "#ffffff",
           "dark": {
-            "backgroundColor": "#121212"
+            "backgroundColor": "#ffffff"
           }
         }
       ],

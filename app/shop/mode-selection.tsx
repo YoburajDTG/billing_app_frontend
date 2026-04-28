@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
-import { useAppTheme } from '@/context/ThemeContext';
+import { useAppTheme, THEME_COLORS } from '@/context/ThemeContext';
 import { Ionicons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import Animated, { FadeInDown, FadeInUp, ZoomIn } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
@@ -20,7 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 export default function ModeSelectionScreen() {
     const router = useRouter();
     const { user } = useAuth();
-    const { isDark, toggleTheme, language, primaryColor } = useAppTheme();
+    const { isDark, toggleTheme, language, primaryColor, setPrimaryColor } = useAppTheme();
     const insets = useSafeAreaInsets();
 
     const handleModeSelect = (mode: 'wholesale' | 'retail') => {
@@ -59,6 +59,27 @@ export default function ModeSelectionScreen() {
                         <Ionicons name={isDark ? "sunny" : "moon"} size={22} color={primaryColor} />
                     </TouchableOpacity>
                 </View>
+
+                <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={false} 
+                    contentContainerStyle={styles.heroColorScroll}
+                    style={styles.heroColorList}
+                >
+                    {THEME_COLORS.map((item: any) => (
+                        <TouchableOpacity
+                            key={item.color}
+                            onPress={() => setPrimaryColor(item.color)}
+                            style={[
+                                styles.miniColorCircle,
+                                { backgroundColor: item.color },
+                                primaryColor === item.color && styles.miniColorActive
+                            ]}
+                        >
+                            {primaryColor === item.color && <Ionicons name="checkmark" size={10} color="#FFF" />}
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
             </LinearGradient>
 
             <ScrollView 
@@ -217,4 +238,25 @@ const styles = StyleSheet.create({
     modeName: { fontSize: moderateScale(20), fontWeight: '900', marginBottom: 2 },
     modeTamil: { fontSize: moderateScale(14), fontWeight: '800', marginBottom: 8 },
     modeDesc: { fontSize: moderateScale(12), fontWeight: '600', lineHeight: moderateScale(18) },
+    heroColorList: {
+        marginTop: verticalScale(15),
+        maxHeight: scale(36),
+    },
+    heroColorScroll: {
+        gap: scale(10),
+        paddingHorizontal: scale(30),
+    },
+    miniColorCircle: {
+        width: scale(28),
+        height: scale(28),
+        borderRadius: scale(14),
+        borderWidth: 1.5,
+        borderColor: 'rgba(255,255,255,0.4)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    miniColorActive: {
+        borderColor: '#FFF',
+        borderWidth: 2,
+    },
 });

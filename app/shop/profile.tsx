@@ -72,6 +72,9 @@ export default function MerchantProfileScreen() {
             if (autoPrint !== null) setIsAutoPrint(autoPrint);
             
             if (lastPrinter) {
+                // Request permissions first
+                await ThermalPrinter.requestPermissions();
+                
                 // Try connecting in the background
                 setPrinterStatus(language === 'Tamil' ? 'மீண்டும் இணைக்கிறது...' : 'Reconnecting...');
                 const conn = await ThermalPrinter.connectPrinter(lastPrinter);
@@ -300,13 +303,24 @@ export default function MerchantProfileScreen() {
                     <View style={styles.inputWrapper}>
                         <Text style={[styles.inputLabel, { color: subTextColor }]}>{language === 'Tamil' ? 'கடை முகவரி' : 'Shop Address'}</Text>
                         <TextInput
-                            style={[styles.input, { height: verticalScale(60), textAlignVertical: 'top', paddingTop: 10, color: textColor, borderColor: isDark ? '#333' : '#E2E8F0', backgroundColor: isDark ? '#2C2C2E' : '#F8FAFC' }]}
+                            style={[
+                                styles.input, 
+                                { 
+                                    height: Math.max(verticalScale(90), 90), 
+                                    textAlignVertical: 'top', 
+                                    paddingTop: Platform.OS === 'ios' ? 16 : 14, 
+                                    paddingBottom: 14,
+                                    color: textColor, 
+                                    borderColor: isDark ? '#333' : '#E2E8F0', 
+                                    backgroundColor: isDark ? '#2C2C2E' : '#F8FAFC' 
+                                }
+                            ]}
                             value={merchantAddress}
                             onChangeText={setMerchantAddress}
                             placeholder={language === 'Tamil' ? 'எ.கா. மெயின் ரோடு, சென்னை' : "e.g. Main Road, Chennai"}
                             placeholderTextColor="#94A3B8"
-                            multiline
-                            numberOfLines={2}
+                            multiline={true}
+                            numberOfLines={3}
                         />
                     </View>
                 </View>
@@ -451,6 +465,33 @@ export default function MerchantProfileScreen() {
 
                     <View style={styles.menuDivider} />
 
+                    {/* Color Picker Section */}
+                    <View style={styles.inputWrapper}>
+                        <Text style={[styles.inputLabel, { color: subTextColor, marginBottom: verticalScale(12) }]}>
+                            {language === 'Tamil' ? 'தீம் நிறம்' : 'Brand Theme Color'}
+                        </Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.colorList}>
+                            {THEME_COLORS.map((item) => (
+                                <TouchableOpacity
+                                    key={item.color}
+                                    onPress={() => setPrimaryColor(item.color)}
+                                    activeOpacity={0.7}
+                                    style={[
+                                        styles.colorCircle,
+                                        { backgroundColor: item.color },
+                                        primaryColor === item.color && styles.activeColorCircle
+                                    ]}
+                                >
+                                    {primaryColor === item.color && (
+                                        <Ionicons name="checkmark" size={16} color="#FFF" />
+                                    )}
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
+
+                    <View style={styles.menuDivider} />
+
                     <View style={styles.settingRow}>
                         <View style={{ flex: 1 }}>
                             <Text style={[styles.settingLabel, { color: textColor }]}>{language === 'Tamil' ? 'மொழி' : 'Language'}</Text>
@@ -527,5 +568,27 @@ const styles = StyleSheet.create({
     pairStatusText: {
         fontSize: 9,
         fontWeight: 'bold',
+    },
+    colorList: {
+        paddingRight: 20,
+        gap: scale(12),
+        paddingVertical: 5
+    },
+    colorCircle: {
+        width: scale(36),
+        height: scale(36),
+        borderRadius: scale(18),
+        alignItems: 'center',
+        justifyContent: 'center',
+        elevation: 4,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 3,
+    },
+    activeColorCircle: {
+        borderWidth: 3,
+        borderColor: '#FFF',
+        transform: [{ scale: 1.1 }]
     },
 });

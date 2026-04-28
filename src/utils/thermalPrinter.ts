@@ -1,38 +1,28 @@
-import { Alert, Platform, NativeModules, PermissionsAndroid } from 'react-native';
+import { Alert, Platform, PermissionsAndroid } from 'react-native';
 import { Storage, KEYS } from '../services/storage';
 
-import { BluetoothEscposPrinter, BluetoothManager } from '@brooons/react-native-bluetooth-escpos-printer';
+let BluetoothEscposPrinter: any;
+let BluetoothManager: any;
 
-export const isPrinterAvailable = !!(BluetoothManager && BluetoothEscposPrinter);
+const loadPrinterModules = () => {
+    try {
+        const BluetoothModule = require('@brooons/react-native-bluetooth-escpos-printer');
+        BluetoothEscposPrinter = BluetoothModule.BluetoothEscposPrinter;
+        BluetoothManager = BluetoothModule.BluetoothManager;
+        return true;
+    } catch (e) {
+        console.warn('Bluetooth printer modules not found', e);
+        return false;
+    }
+};
 
-export interface ReceiptItem {
-    name: string;
-    tamilName?: string;
-    quantity: number;
-    unitPrice: number;
-    totalPrice: number;
-    unit?: string;
-}
+export const isPrinterAvailable = true;
 
-export interface ReceiptData {
-    shopName: string;
-    billId: string;
-    date: string;
-    items: ReceiptItem[];
-    totalAmount: number;
-    discount?: number;
-    customerName?: string;
-    customerMobile?: string;
-    shopPhone?: string;
-    shopAddress?: string;
-    gstNumber?: string;
-    receivedAmount?: number;
-    balanceAmount?: number;
-}
-
-// 80mm (3 inch) printer usually has 48 characters width
-const COLUMN_WIDTH_80MM = 48;
-
+/**
+ * Utility for thermal printer operations
+ * This utility EXCLUSIVELY uses image-based printing (printPic)
+ * to ensure perfect alignment and Tamil language support.
+ */
 export const ThermalPrinter = {
     /**
      * Request necessary permissions for Bluetooth on Android
@@ -42,17 +32,21 @@ export const ThermalPrinter = {
         
         try {
             if (Platform.Version >= 31) {
-                const granted = await PermissionsAndroid.requestMultiple([
-                    PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-                    PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-                    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-                ]);
+                const permissions = [
+                    'android.permission.BLUETOOTH_SCAN' as any,
+                    'android.permission.BLUETOOTH_CONNECT' as any,
+                ];
+                
+                if (Platform.Version < 33) {
+                    permissions.push(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+                }
 
-                return (
-                    granted['android.permission.BLUETOOTH_SCAN'] === PermissionsAndroid.RESULTS.GRANTED &&
-                    granted['android.permission.BLUETOOTH_CONNECT'] === PermissionsAndroid.RESULTS.GRANTED &&
-                    granted['android.permission.ACCESS_FINE_LOCATION'] === PermissionsAndroid.RESULTS.GRANTED
-                );
+                const granted = await PermissionsAndroid.requestMultiple(permissions);
+                
+                const scanGranted = granted['android.permission.BLUETOOTH_SCAN' as any] === PermissionsAndroid.RESULTS.GRANTED;
+                const connectGranted = granted['android.permission.BLUETOOTH_CONNECT' as any] === PermissionsAndroid.RESULTS.GRANTED;
+                
+                return scanGranted && connectGranted;
             } else {
                 const granted = await PermissionsAndroid.request(
                     PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
@@ -66,208 +60,155 @@ export const ThermalPrinter = {
     },
 
     /**
-     * Connect to a printer. If address is provided, connect to it.
-     * If no address, try connecting to the last used printer.
+     * Connect to a printer. 
      */
     async connectPrinter(address?: string) {
-        if (!isPrinterAvailable) return { success: false, message: 'Printer module not available' };
+        if (!loadPrinterModules()) return { success: false, message: 'Printer module not available.' };
         
         const targetAddress = address || await Storage.getItem(KEYS.LAST_PRINTER);
         if (!targetAddress) return { success: false, message: 'No printer selected' };
 
+        console.log(`Attempting connection to: ${targetAddress}`);
+
         try {
-            const isEnabled = await BluetoothManager.isBluetoothEnabled();
-            if (!isEnabled) {
-                return { success: false, message: 'Bluetooth is turned off' };
+            if (typeof BluetoothManager?.checkBluetoothEnabled !== 'function') {
+                return { success: false, message: 'Bluetooth Manager not initialized.' };
             }
 
-            // Attempt connection with a small retry logic for stability
-            let result = null;
+            const hasPermission = await this.requestPermissions();
+            if (!hasPermission) {
+                return { success: false, message: 'Bluetooth permissions required.' };
+            }
+
+            const isEnabled = await BluetoothManager.checkBluetoothEnabled();
+            if (!isEnabled) {
+                try {
+                    await BluetoothManager.enableBluetooth();
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                } catch (e) {
+                    return { success: false, message: 'Please turn on Bluetooth.' };
+                }
+            }
+
+            // PRIMARY CONNECTION ATTEMPT
             try {
-                result = await BluetoothManager.connect(targetAddress);
-            } catch (e) {
-                // Wait 1 second and retry once
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                result = await BluetoothManager.connect(targetAddress);
+                await BluetoothManager.connect(targetAddress);
+                console.log('Printer connected successfully (Primary)');
+                return { success: true };
+            } catch (firstErr) {
+                console.warn('Primary connection failed, attempting Discovery-Connect retry...', firstErr);
+                
+                // DISCOVERY-CONNECT RETRY: Briefly scan to "wake up" the OS Bluetooth handle
+                try {
+                    await BluetoothManager.scanDevices();
+                    await new Promise(resolve => setTimeout(resolve, 1500)); // Short scan window
+                } catch (scanErr) {
+                    console.warn('Retry scan failed:', scanErr);
+                }
+
+                // SECONDARY CONNECTION ATTEMPT
+                await BluetoothManager.connect(targetAddress);
+                console.log('Printer connected successfully (Retry)');
+                return { success: true };
             }
-            
-            // Save as last printer if successful
-            if (address) {
-                await Storage.setItem(KEYS.LAST_PRINTER, address);
-            }
-            
-            return { success: true, message: 'Connected successfully' };
-        } catch (error) {
-            console.error('Connection failed:', error);
-            return { 
-                success: false, 
-                message: 'Failed to connect. Please try pairing the printer in your Phone Settings first then try again.' 
-            };
+        } catch (error: any) {
+            console.error('Connection failed definitively for:', targetAddress, error);
+            return { success: false, message: error.message || 'Connection failed' };
         }
     },
 
     /**
-     * Print a formatted invoice
+     * Print a Base64 image or a file URI
+     * @param uriOrBase64 - The image source
+     * @param width - The target print width (384 for 2-inch, 576 for 3-inch)
      */
-    async printInvoice(data: ReceiptData) {
-        if (!isPrinterAvailable) {
-            console.warn('Printer native module not available.');
-            return false;
-        }
-
+    async printImage(uriOrBase64: string, width: number = 384) {
+        if (!loadPrinterModules()) return false;
         try {
-            // 1. Ensure connected
             const connection = await this.connectPrinter();
-            if (!connection.success) {
-                Alert.alert('Printer Error', connection.message);
-                return false;
+            if (!connection.success) return false;
+
+            // WARM-UP DELAY: Give the printer a moment to stabilize the socket after connection
+            await new Promise(resolve => setTimeout(resolve, 1500));
+
+            let base64Data = '';
+
+            if (uriOrBase64.startsWith('file://') || uriOrBase64.startsWith('/') || uriOrBase64.startsWith('content://')) {
+                try {
+                    const FileSystem = require('expo-file-system/legacy');
+                    base64Data = await FileSystem.readAsStringAsync(uriOrBase64, {
+                        encoding: 'base64',
+                    });
+                } catch (readErr) {
+                    console.error('Failed to read image file:', readErr);
+                    return false;
+                }
+            } else {
+                base64Data = uriOrBase64.includes(',') ? uriOrBase64.split(',')[1] : uriOrBase64;
             }
+            
+            if (!base64Data) return false;
 
-            // 2. Start Printing
-            // 80mm layout
-            const width = COLUMN_WIDTH_80MM;
-            const divider = '-'.repeat(width) + '\n';
+            const printWidth = width || 384;
+            
+            // 1. Initialize & Reset
+            await BluetoothEscposPrinter.printText('\x1b\x40', {}); 
+            await new Promise(resolve => setTimeout(resolve, 500));
 
-            await BluetoothEscposPrinter.printerAlign(1); // CENTER
-            await BluetoothEscposPrinter.setBlob(1); // Bold
-            await BluetoothEscposPrinter.printText(`${data.shopName}\n`, {
-                widthtimes: 1, // Double width for shop name
-                heigthtimes: 1,
+            // 2. Center Alignment
+            await BluetoothEscposPrinter.printerAlign(1); 
+            
+            // 3. Print Image - Centered
+            await BluetoothEscposPrinter.printPic(base64Data, {
+                width: printWidth
             });
-            await BluetoothEscposPrinter.setBlob(0);
             
-            if (data.shopAddress) {
-                await BluetoothEscposPrinter.printText(`${data.shopAddress}\n`, {});
-            }
-            if (data.shopPhone) {
-                await BluetoothEscposPrinter.printText(`Phone: ${data.shopPhone}\n`, {});
-            }
-            if (data.gstNumber) {
-                await BluetoothEscposPrinter.printText(`GST: ${data.gstNumber}\n`, {});
-            }
-            
-            await BluetoothEscposPrinter.printText(divider, {});
-
-            await BluetoothEscposPrinter.printerAlign(0); // LEFT
-            // Bill Info Line
-            const dateStr = `Date: ${data.date}`;
-            const billStr = `Bill: ${data.billId}`;
-            const infoLine = dateStr + ' '.repeat(width - dateStr.length - billStr.length) + billStr + '\n';
-            await BluetoothEscposPrinter.printText(infoLine, {});
-
-            if (data.customerName) {
-                await BluetoothEscposPrinter.printText(`Customer: ${data.customerName}\n`, {});
-            }
-            if (data.customerMobile) {
-                await BluetoothEscposPrinter.printText(`Mobile  : ${data.customerMobile}\n`, {});
-            }
-            
-            await BluetoothEscposPrinter.printText(divider, {});
-
-            // Table Header: Item (24), Qty (8), Rate (8), Total (8) -> 48 chars
-            const header = 'Item'.padEnd(24) + 'Qty'.padStart(8) + 'Rate'.padStart(8) + 'Total'.padStart(8) + '\n';
-            await BluetoothEscposPrinter.printText(header, {});
-            await BluetoothEscposPrinter.printText(divider, {});
-
-            for (const item of data.items) {
-                // Handle long item names by wrapping or truncating
-                const name = item.name.length > 23 ? item.name.substring(0, 23) : item.name;
-                const qtyLine = name.padEnd(24) + 
-                               item.quantity.toString().padStart(8) + 
-                               item.unitPrice.toFixed(2).padStart(8) + 
-                               item.totalPrice.toFixed(2).padStart(8) + '\n';
-                
-                await BluetoothEscposPrinter.printText(qtyLine, {});
-            }
-
-            await BluetoothEscposPrinter.printText(divider, {});
-
-            // Summary
-            await BluetoothEscposPrinter.printerAlign(2); // RIGHT
-            const totalText = `GRAND TOTAL: Rs. ${data.totalAmount.toFixed(2)}`;
-            await BluetoothEscposPrinter.setBlob(1);
-            await BluetoothEscposPrinter.printText(`${totalText}\n`, {
-                widthtimes: 0,
-                heigthtimes: 0,
-            });
-            await BluetoothEscposPrinter.setBlob(0);
-
-            if (data.receivedAmount !== undefined) {
-                await BluetoothEscposPrinter.printText(`Received: Rs. ${data.receivedAmount.toFixed(2)}\n`, {});
-                await BluetoothEscposPrinter.printText(`Balance : Rs. ${data.balanceAmount?.toFixed(2) || '0.00'}\n`, {});
-            }
-
-            await BluetoothEscposPrinter.printText('\n', {});
-            await BluetoothEscposPrinter.printerAlign(1); // CENTER
-            await BluetoothEscposPrinter.printText('Thank you! Visit Again\n', {});
-            await BluetoothEscposPrinter.printText('Powered by VegBilling App\n', {});
-            
-            // Feed and Cut
-            await BluetoothEscposPrinter.printText('\n\n\n', {});
-            await BluetoothEscposPrinter.printText('\x1dV\x42\x00', {}); // Cut command
-
+            // 4. Feed paper
+            await BluetoothEscposPrinter.printAndFeed(6); 
             return true;
         } catch (error) {
-            console.error('Print failed:', error);
-            Alert.alert('Print Error', 'Printing failed. Please check connection and try again.');
+            console.error('Image print failed:', error);
             return false;
         }
-    },
-
-    /**
-     * Logic to be called after invoice save
-     */
-    async autoPrintAfterSave(data: ReceiptData) {
-        const isAutoPrintEnabled = await Storage.getItem(KEYS.AUTO_PRINT);
-        if (isAutoPrintEnabled) {
-            return await this.printInvoice(data);
-        }
-        return false;
     },
 
     /**
      * Discover Bluetooth devices
      */
     async discoverDevices() {
-        if (!isPrinterAvailable || Platform.OS !== 'android') return [];
-        
+        if (!loadPrinterModules() || Platform.OS !== 'android') return [];
         try {
             const hasPermission = await this.requestPermissions();
             if (!hasPermission) return [];
 
-            // Get paired devices FIRST (instantly)
             const paired = await this.getPairedDevices();
-            
-            // Start scanning for NEW devices
-            const scanResult = await BluetoothManager.scanDevices();
-            let found = [];
+            let allDevices = [...paired];
             
             try {
-                // The scanResult is usually a JSON string
-                const parsed = typeof scanResult === 'string' ? JSON.parse(scanResult) : scanResult;
-                found = parsed.found || [];
-            } catch (e) {
-                console.warn('Error parsing scan result:', e);
-            }
+                const scanResult = await BluetoothManager.scanDevices();
+                let found = [];
+                if (scanResult) {
+                    const parsed = typeof scanResult === 'string' ? JSON.parse(scanResult) : scanResult;
+                    found = parsed.found || parsed || [];
+                }
 
-            // Combine and format
-            const allDevices = [...paired];
-            
-            found.forEach((dev: any) => {
-                const device = typeof dev === 'string' ? JSON.parse(dev) : dev;
-                if (!allDevices.some(d => d.address === device.address)) {
-                    allDevices.push({
-                        name: device.name || 'Unknown Device',
-                        address: device.address,
-                        type: 'found'
+                if (Array.isArray(found)) {
+                    found.forEach((dev: any) => {
+                        let device = dev;
+                        try { if (typeof dev === 'string') device = JSON.parse(dev); } catch (e) {}
+                        if (device && device.address && !allDevices.some(d => d.address === device.address)) {
+                            allDevices.push({
+                                name: device.name || 'Unknown Device',
+                                address: device.address,
+                                type: 'found'
+                            });
+                        }
                     });
                 }
-            });
+            } catch (e) {}
 
             return allDevices;
         } catch (error) {
-            console.error('Discovery failed:', error);
-            // Fallback to just paired devices if scan fails
             return await this.getPairedDevices();
         }
     },
@@ -276,43 +217,34 @@ export const ThermalPrinter = {
      * Get paired devices
      */
     async getPairedDevices() {
-        if (!isPrinterAvailable || Platform.OS !== 'android') return [];
+        if (!loadPrinterModules() || Platform.OS !== 'android') return [];
         try {
             const response = await BluetoothManager.getPairedDevices();
             const devices = typeof response === 'string' ? JSON.parse(response) : response;
-            
             return (devices || []).map((d: any) => ({
                 name: d.name || 'Unknown Device',
                 address: d.address,
                 type: 'paired'
             }));
         } catch (error) {
-            console.error('Error getting paired devices:', error);
             return [];
         }
     },
 
     /**
-     * Print a test page
+     * Diagnostic test print
      */
     async testPrint() {
-        if (!isPrinterAvailable) return;
+        if (!loadPrinterModules()) return;
         try {
             const connection = await this.connectPrinter();
-            if (!connection.success) {
-                Alert.alert('Error', connection.message);
-                return;
-            }
+            if (!connection.success) return;
 
             await BluetoothEscposPrinter.printerAlign(1);
-            await BluetoothEscposPrinter.printText('--- TEST PRINT ---\n', {});
-            await BluetoothEscposPrinter.printText('Printer is working correctly!\n', {});
-            await BluetoothEscposPrinter.printText('80mm / 3 inch Support\n', {});
-            await BluetoothEscposPrinter.printText('------------------\n', {});
-            await BluetoothEscposPrinter.printText('\n\n\n', {});
-            await BluetoothEscposPrinter.printText('\x1dV\x42\x00', {});
-        } catch (e) {
-            console.error(e);
-        }
+            await BluetoothEscposPrinter.printText('--- PRINTER TEST ---\n', {});
+            await BluetoothEscposPrinter.printText('Image Mode Ready\n', {});
+            await BluetoothEscposPrinter.printText('--------------------\n', {});
+            await BluetoothEscposPrinter.printAndFeed(4);
+        } catch (e) {}
     }
 };

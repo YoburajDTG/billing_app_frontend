@@ -26,8 +26,9 @@ type BillData = {
 export const generateBillPDF = async (data: BillData, options: { printDirect?: boolean, printerSize?: '2inch' | '3inch' } = {}) => {
   const is3Inch = options.printerSize === '3inch';
   
-  // 58mm (2-inch) is ~164pt, 80mm (3-inch) is ~226pt
-  const pageWidth = is3Inch ? 226 : 164;
+  // ISO A8 is 52mm x 74mm. In points (72dpi): 147pt x 210pt
+  // 80mm (3-inch) is ~226pt
+  const pageWidth = is3Inch ? 226 : 147;
   
   const html = `
     <html>
@@ -36,7 +37,7 @@ export const generateBillPDF = async (data: BillData, options: { printDirect?: b
         <style>
           @page { 
             margin: 0; 
-            size: ${is3Inch ? '80mm' : '58mm'} auto;
+            size: ${is3Inch ? '80mm' : '52mm 74mm'};
           }
           * { 
             box-sizing: border-box; 
@@ -46,8 +47,8 @@ export const generateBillPDF = async (data: BillData, options: { printDirect?: b
           }
           body { 
             font-family: 'Inter', 'Helvetica', 'Arial', sans-serif; 
-            width: ${is3Inch ? '80mm' : '58mm'};
-            padding: ${is3Inch ? '12px 16px' : '8px 10px'}; 
+            width: ${is3Inch ? '80mm' : '52mm'};
+            padding: ${is3Inch ? '12px 16px' : '6px 8px'}; 
             color: #000;
             background: #fff;
           }

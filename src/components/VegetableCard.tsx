@@ -27,7 +27,7 @@ export const VegetableCard: React.FC<VegetableProps> = ({
   onPress,
   onUpdatePrice,
 }) => {
-  const { isDark } = useAppTheme();
+  const { isDark, primaryColor } = useAppTheme();
   const [isEditing, setIsEditing] = useState(false);
   const [localPrice, setLocalPrice] = useState<string | undefined>(
     price !== undefined ? String(price) : undefined,
@@ -56,7 +56,7 @@ export const VegetableCard: React.FC<VegetableProps> = ({
         </Text>
 
         {price !== undefined && !isEditing && (
-          <Text style={[styles.price, { color: isDark ? "#FFA000" : "#FF8C00" }]}>
+          <Text style={[styles.price, { color: primaryColor, backgroundColor: primaryColor + "20" }]}>
             ₹{price}/kg
           </Text>
         )}
@@ -68,14 +68,14 @@ export const VegetableCard: React.FC<VegetableProps> = ({
               key={q}
               style={[
                 styles.qtyChip,
-                selectedQty === q ? styles.qtyChipActive : null,
+                selectedQty === q ? { backgroundColor: primaryColor + '15', borderColor: primaryColor } : null,
               ]}
               onPress={() => setSelectedQty(q)}
             >
               <Text
                 style={[
                   styles.qtyChipText,
-                  selectedQty === q ? styles.qtyChipTextActive : null,
+                  selectedQty === q ? { color: primaryColor } : null,
                 ]}
               >
                 {q} kg
@@ -122,7 +122,7 @@ export const VegetableCard: React.FC<VegetableProps> = ({
             />
             <View style={styles.editorRow}>
               <TouchableOpacity
-                style={[styles.saveBtn]}
+                style={[styles.saveBtn, { backgroundColor: primaryColor }]}
                 onPress={() => {
                   const parsed =
                     localPrice !== undefined ? parseFloat(localPrice) : NaN;

@@ -197,27 +197,27 @@ export default function BillingHistoryScreen() {
 
       let message = `🧾 *${(mName || "SUJI VEGETABLES").toUpperCase()}*\n`;
       message += `${language === 'Tamil' ? 'போன்' : 'Ph'}: ${mNumber || "9095938085"}\n`;
-      message += `--------------------------\n`;
+      message += `==========================\n`;
       message += `${language === 'Tamil' ? 'பில் எண்' : 'Bill No'}: *${bill.id}*\n`;
       message += `${language === 'Tamil' ? 'தேதி' : 'Date'}: ${new Date(bill.created_at).toLocaleString('en-IN')}\n`;
-      message += `${language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Customer'}: ${bill.customer_name || (language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Guest')}\n`;
-      message += `--------------------------\n`;
+      message += `${language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Cust'}: ${bill.customer_name || (language === 'Tamil' ? 'வாடிக்கையாளர்' : 'Guest')}\n`;
+      message += `==========================\n`;
 
       items.forEach((item: any) => {
-        const name = item.tamil_name || item.name;
-        message += `• ${name}\n`;
+        const name = (item.tamil_name || item.name).padEnd(15);
+        message += `• *${name.trim()}*\n`;
         message += `  ${item.quantity}kg x ₹${item.unit_price} = *₹${item.total_price.toFixed(0)}*\n`;
       });
 
+      message += `==========================\n`;
       if (bill.discount > 0) {
-        message += `--------------------------\n`;
         message += `${language === 'Tamil' ? 'கூட்டுத் தொகை' : 'Subtotal'}: ₹${(bill.total_amount + bill.discount).toFixed(0)}\n`;
         message += `${language === 'Tamil' ? 'தள்ளுபடி' : 'Discount'}: -₹${bill.discount.toFixed(0)}\n`;
+        message += `--------------------------\n`;
       }
 
-      message += `--------------------------\n`;
       message += `*${language === 'Tamil' ? 'மொத்த தொகை' : 'GRAND TOTAL'}: ₹${bill.total_amount.toFixed(0)}*\n`;
-      message += `--------------------------\n`;
+      message += `==========================\n`;
       message += language === 'Tamil' ? `நன்றி! மீண்டும் வருக.` : `Thank you! Visit again.`;
 
       let whatsappUrl = `whatsapp://send?text=${encodeURIComponent(message)}`;
@@ -299,7 +299,7 @@ export default function BillingHistoryScreen() {
         <View
           style={[
             styles.iconBox,
-            { backgroundColor: isDark ? 'rgba(255,140,0,0.1)' : "#FFF4E5" },
+            { backgroundColor: primaryColor + '15' },
           ]}
         >
           <MaterialCommunityIcons
@@ -721,7 +721,7 @@ export default function BillingHistoryScreen() {
 
               {selectedBill?.paymentStatus === 'WAITING' && (
                 <TouchableOpacity
-                    style={[styles.downloadBtn, { backgroundColor: '#FF8C00', flex: 0.8 }]}
+                    style={[styles.downloadBtn, { backgroundColor: primaryColor, flex: 0.8 }]}
                     onPress={() => handleEditBill(selectedBill)}
                 >
                     <MaterialCommunityIcons name="pencil" size={20} color="#FFF" />
